@@ -23,15 +23,16 @@ type Project = {
 };
 
 const seedProjects: Project[] = [
-  { name: "App Saúde+", class: "2023.2", year: "2023", tech: ["React", "Node.js", "PostgreSQL"], status: "Concluído", description: "Aplicativo para gestão de saúde e agendamento de consultas." },
-  { name: "EcoTrack", class: "2023.1", year: "2023", tech: ["Python", "AWS"], status: "Concluído", description: "Sistema de monitoramento ambiental com IoT e análise de dados." },
-  { name: "Conecta+", class: "2022.2", year: "2022", tech: ["Flutter", "Firebase"], status: "Em andamento", description: "Plataforma de conexão entre estudantes e oportunidades." },
-  { name: "Smart Campus", class: "2021.1", year: "2021", tech: ["React", "PostgreSQL"], status: "Disponível para continuar", description: "Sistema de gestão inteligente para campus universitário." },
-  { name: "VidaFit", class: "2024.1", year: "2024", tech: ["React", "Node.js"], status: "Em andamento", description: "Experiência de bem-estar e hábitos saudáveis para estudantes." },
+  { id: "seed-saude", name: "App Saúde+", class: "2023.2", year: "2023", tech: ["React", "Node.js", "PostgreSQL"], status: "Concluído", description: "Aplicativo para gestão de saúde e agendamento de consultas." },
+  { id: "seed-ecotrack", name: "EcoTrack", class: "2023.1", year: "2023", tech: ["Python", "AWS"], status: "Concluído", description: "Sistema de monitoramento ambiental com IoT e análise de dados." },
+  { id: "seed-conecta", name: "Conecta+", class: "2022.2", year: "2022", tech: ["Flutter", "Firebase"], status: "Em andamento", description: "Plataforma de conexão entre estudantes e oportunidades." },
+  { id: "seed-campus", name: "Smart Campus", class: "2021.1", year: "2021", tech: ["React", "PostgreSQL"], status: "Disponível para continuar", description: "Sistema de gestão inteligente para campus universitário." },
+  { id: "seed-vidafit", name: "VidaFit", class: "2024.1", year: "2024", tech: ["React", "Node.js"], status: "Em andamento", description: "Experiência de bem-estar e hábitos saudáveis para estudantes." },
 ];
 
 const PROJECTS_STORAGE_KEY = "acervo-projetos:projects";
 const DRAFT_STORAGE_KEY = "acervo-projetos:draft";
+const CONTINUITY_DRAFT_STORAGE_KEY = "acervo-projetos:continuity:";
 
 function readSavedProjects(): Project[] {
   try {
@@ -39,7 +40,7 @@ function readSavedProjects(): Project[] {
     if (!Array.isArray(stored)) return [];
     return stored.filter((item: unknown): item is Project => {
       const project = item as Partial<Project> | null;
-      return Boolean(project && typeof project.id === "string" && typeof project.name === "string" && typeof project.status === "string");
+      return Boolean(project && typeof project.id === "string" && typeof project.name === "string" && typeof project.class === "string" && typeof project.year === "string" && Array.isArray(project.tech) && typeof project.status === "string");
     });
   } catch {
     return [];
@@ -249,8 +250,25 @@ function Steps({ labels, current }: { labels: string[]; current: number }) {
 
 function Continuity({ project, initialPlan, onSuccess }: { project: Project; initialPlan: string; onSuccess: (project: Project) => void }) {
   const [step, setStep] = useState(0);
-  const [team, setTeam] = useState(project.team?.length ? [...project.team] : [""]);
-  const [form, setForm] = useState({ class: "", objective: initialPlan, plan: initialPlan, dueDate: "" });
+  const draftKey = `${CONTINUITY_DRAFT_STORAGE_KEY}${project.id ?? project.name}`;
+  const [draft] = useState(() => {
+    const initial = { team: project.team?.length ? [...project.team] : [""], form: { class: "", objective: initialPlan, plan: initialPlan, dueDate: "" } };
+    try {
+      const stored = window.localStorage.getItem(draftKey);
+      return stored ? { ...initial, ...JSON.parse(stored) } : initial;
+    } catch {
+      return initial;
+    }
+  });
+  const [team, setTeam] = useState<string[]>(draft.team);
+  const [form, setForm] = useState(draft.form);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(draftKey, JSON.stringify({ team, form }));
+    } catch {
+      return;
+    }
+  }, [draftKey, team, form]);
   const valid = step === 0 ? !!form.objective.trim() : step === 2 ? !!form.plan.trim() : true;
   const saveVersion = () => onSuccess({
     id: crypto.randomUUID(), name: `${project.name} (nova versão)`, class: form.class,
@@ -260,11 +278,17 @@ function Continuity({ project, initialPlan, onSuccess }: { project: Project; ini
     plan: form.plan, dueDate: form.dueDate, versionOf: project.id,
     mineStatus: "Em desenvolvimento",
   });
+  const finishVersion = () => {
+    try {
+      window.localStorage.removeItem(draftKey);
+    } catch {}
+    saveVersion();
+  };
   return <div className="page wizard-page"><h2>Continuar projeto</h2><Steps labels={["Projeto", "Equipe", "Plano"]} current={step} /><div className="wizard-layout"><section className="panel wizard-card">
     {step === 0 && <><h3>Informações da nova versão</h3><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => setForm({ ...form, class: e.target.value })} placeholder="Opcional" /></Field><Field label="Objetivo da nova versão *"><textarea value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} placeholder="Descreva as entregas e os objetivos desta etapa..." /></Field></>}
     {step === 1 && <><h3>Participantes</h3><p className="muted">Informe quem participa desta etapa. Este campo é opcional.</p>{team.map((member, i) => <div className="member-input" key={i}><input value={member} onChange={(e) => setTeam(team.map((m, j) => j === i ? e.target.value : m))} placeholder="Nome do participante" />{i > 0 && <button onClick={() => setTeam(team.filter((_, j) => i !== j))}>×</button>}</div>)}<button className="secondary" onClick={() => setTeam([...team, ""])}>+ Adicionar participante</button></>}
     {step === 2 && <><h3>Plano de continuidade</h3><Field label="Descrição do plano *"><textarea value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} placeholder="Liste ações, etapas e próximos passos..." /></Field><Field label="Previsão de conclusão"><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field></>}
-    <div className="wizard-actions"><button className="secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>Voltar</button>{step < 2 ? <button className="primary" disabled={!valid} onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" disabled={!valid} onClick={saveVersion}>Criar nova versão</button>}</div>
+    <div className="wizard-actions"><button className="secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>Voltar</button>{step < 2 ? <button className="primary" disabled={!valid} onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" disabled={!valid} onClick={finishVersion}>Criar nova versão</button>}</div>
   </section><Original project={project} /></div></div>;
 }
 
@@ -300,9 +324,7 @@ function Register({ onSuccess }: { onSuccess: (project: Project) => void }) {
     };
     try {
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-    } catch {
-      return;
-    }
+    } catch {}
     onSuccess(project);
   };
   return <div className="page register"><h2>Cadastro de novo projeto</h2><Steps labels={labels} current={step} /><div className="register-layout"><section className="panel wizard-card">
@@ -337,7 +359,7 @@ function AIPanel({ project, close, usePlan }: { project: Project; close: () => v
   const analyze = () => { setState("loading"); window.setTimeout(() => setState("ready"), 1800); };
   const plan = suggestions.filter((s) => s.added).map((s) => s.title).join(", ");
   return <><div className="overlay" onClick={close} /><aside className="ai-panel"><button className="close" onClick={close}><Icon name="close" size={20} /></button><div className="ai-title"><div className="ai-brain"><Icon name="spark" /></div><div><h2>IA Assistente</h2><p>Analise e inove, não substitui o trabalho.</p></div></div><div className="ai-project"><Picture /><div><b>{project.name}</b><small>{project.area || project.class || project.year}</small><Tags items={projectResources(project).slice(0, 2)} /></div></div><button className="ai-analyze" disabled={state === "loading"} onClick={analyze}>{state === "loading" ? <><span className="spinner" /> Analisando...</> : state === "ready" ? "Analisar novamente" : "Analisar projeto"}</button>
-    {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Descubra novas possibilidades</h3><p>A IA analisará a ficha e a stack para sugerir caminhos de inovação.</p></div>}
+    {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Descubra novas possibilidades</h3><p>A IA analisará a ficha e os recursos para sugerir caminhos de desenvolvimento.</p></div>}
     {state === "loading" && <div className="skeletons"><i /><i /><i /><i /></div>}
     {state === "ready" && <div className="suggestions"><h3>Sugestões geradas pela IA</h3>{suggestions.map((s) => <article key={s.id}><div className="suggest-icon"><Icon name="spark" size={16} /></div><div><b>{s.title}</b><p>{s.text}</p><div><button className={s.added ? "added" : "primary"} onClick={() => setSuggestions(suggestions.map((x) => x.id === s.id ? { ...x, added: true } : x))}>{s.added ? <><Icon name="check" size={14} /> Adicionado</> : "Adicionar ao plano"}</button><button className="text-button" onClick={() => setSuggestions(suggestions.filter((x) => x.id !== s.id))}>Descartar</button></div></div></article>)}</div>}
     <div className="ai-chat"><input placeholder="Converse com a IA sobre o projeto..." /><button>➤</button><div><span>Ampliar impacto</span><span>Planejar avaliação</span></div></div><button className="use-plan" disabled={!plan} onClick={() => usePlan(plan)}>Usar no plano da Nova Versão</button>
@@ -371,11 +393,16 @@ export default function App() {
     setSelected(project);
     setSuccess("project");
   };
+  const saveVersion = (project: Project) => {
+    setUserProjects((current) => [project, ...current]);
+    setSelected(project);
+    setSuccess("version");
+  };
   return <Shell screen={screen} go={go}>
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
-    {screen === "archive" && <Archive go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
+    {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
     {screen === "detail" && <Detail project={selected} projects={projects} go={go} openAI={() => setAiOpen(true)} selectProject={selectProject} />}
-    {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveProject} />}
+    {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
     {screen === "mine" && <Mine projects={projects} go={go} selectProject={selectProject} />}
     {aiOpen && <AIPanel project={selected} close={() => setAiOpen(false)} usePlan={(value) => { setPlan(value); setAiOpen(false); go("continuity"); }} />}
