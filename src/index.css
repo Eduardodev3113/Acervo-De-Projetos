@@ -212,6 +212,15 @@ p { line-height: 1.55; }
 .success-check { width: 58px; height: 58px; margin: 0 auto 18px; display: grid; place-items: center; border-radius: 50%; color: white; background: #2b9c72; }
 .success-modal h2 { margin-bottom: 8px; }
 .success-modal p { color: #60778a; margin-bottom: 24px; }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px max(24px, calc((100% - 1420px) / 2)); color: #684d14; background: #fff5dc; border-bottom: 1px solid #ead49d; font-size: 13px; }
+.notice button { border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1; }
+.backend-loading { width: min(1420px, calc(100% - 48px)); margin: 12px auto 0; color: #60778a; font-size: 12px; }
+.form-error { color: #a32929; background: #fff1f0; border: 1px solid #f0c4c1; border-radius: 4px; padding: 10px 12px; font-size: 12px; }
+.auth-modal { position: fixed; z-index: 81; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100% - 32px)); padding: 28px; background: white; border: 1px solid #d6e1e9; border-radius: 7px; box-shadow: 0 24px 70px rgba(7,29,46,.28); }
+.auth-modal h2 { margin: 0 0 20px; font-size: 21px; }
+.auth-modal form > .primary { width: 100%; margin-top: 10px; }
+.auth-switch { display: block; margin: 18px auto 0; border: 0; background: transparent; color: #315e7e; font-size: 12px; text-decoration: underline; }
+.auth-modal .close { top: 18px; right: 18px; }
 
 @media (max-width: 900px) {
   header { padding: 0 18px; }

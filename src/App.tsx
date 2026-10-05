@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
+import type { User } from "@supabase/supabase-js";
+import { ATTACHMENTS_BUCKET, supabase } from "./supabase";
 
 type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine";
+type ProjectAttachment = { name: string; path?: string };
 type Project = {
   id?: string;
+  ownerId?: string;
   name: string;
   class: string;
   year: string;
@@ -15,7 +19,7 @@ type Project = {
   objective?: string;
   results?: string;
   team?: string[];
-  attachments?: string[];
+  attachments?: ProjectAttachment[];
   mineStatus?: string;
   versionOf?: string;
   plan?: string;
@@ -30,13 +34,13 @@ const seedProjects: Project[] = [
   { id: "seed-vidafit", name: "VidaFit", class: "2024.1", year: "2024", tech: ["React", "Node.js"], status: "Em andamento", description: "Experiência de bem-estar e hábitos saudáveis para estudantes." },
 ];
 
-const PROJECTS_STORAGE_KEY = "acervo-projetos:projects";
+const LEGACY_PROJECTS_STORAGE_KEY = "acervo-projetos:projects";
 const DRAFT_STORAGE_KEY = "acervo-projetos:draft";
 const CONTINUITY_DRAFT_STORAGE_KEY = "acervo-projetos:continuity:";
 
 function readSavedProjects(): Project[] {
   try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(PROJECTS_STORAGE_KEY) ?? "[]");
+    const stored: unknown = JSON.parse(window.localStorage.getItem(LEGACY_PROJECTS_STORAGE_KEY) ?? "[]");
     if (!Array.isArray(stored)) return [];
     return stored.filter((item: unknown): item is Project => {
       const project = item as Partial<Project> | null;
@@ -47,8 +51,96 @@ function readSavedProjects(): Project[] {
   }
 }
 
+type ProjectRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  project_class: string;
+  year: string;
+  tech: string[];
+  resources: string[];
+  area: string;
+  status: string;
+  description: string;
+  objective: string;
+  results: string;
+  team: string[];
+  attachments: unknown;
+  mine_status: string;
+  version_of: string | null;
+  plan: string;
+  due_date: string | null;
+};
+
+function normalizeAttachments(value: unknown): ProjectAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): ProjectAttachment[] => {
+    if (typeof item === "string") return [{ name: item }];
+    if (!item || typeof item !== "object") return [];
+    const attachment = item as Partial<ProjectAttachment>;
+    return typeof attachment.name === "string"
+      ? [{ name: attachment.name, path: typeof attachment.path === "string" ? attachment.path : undefined }]
+      : [];
+  });
+}
+
+function projectFromRow(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    class: row.project_class,
+    year: row.year,
+    tech: row.tech ?? [],
+    resources: row.resources ?? [],
+    area: row.area,
+    status: row.status,
+    description: row.description,
+    objective: row.objective,
+    results: row.results,
+    team: row.team ?? [],
+    attachments: normalizeAttachments(row.attachments),
+    mineStatus: row.mine_status,
+    versionOf: row.version_of ?? undefined,
+    plan: row.plan,
+    dueDate: row.due_date ?? undefined,
+  };
+}
+
+function projectToRow(project: Project, ownerId: string) {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return {
+    id: project.id,
+    owner_id: ownerId,
+    name: project.name,
+    project_class: project.class,
+    year: project.year,
+    tech: project.tech,
+    resources: project.resources ?? [],
+    area: project.area ?? "",
+    status: project.status,
+    description: project.description,
+    objective: project.objective ?? "",
+    results: project.results ?? "",
+    team: project.team ?? [],
+    attachments: normalizeAttachments(project.attachments),
+    mine_status: project.mineStatus ?? "Em desenvolvimento",
+    version_of: project.versionOf && uuidPattern.test(project.versionOf) ? project.versionOf : null,
+    plan: project.plan ?? "",
+    due_date: project.dueDate || null,
+  };
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Não foi possível concluir a operação.";
+}
+
 function projectResources(project: Project) {
   return project.resources?.length ? project.resources : project.tech;
+}
+
+function attachmentUrl(path?: string) {
+  return path && supabase ? supabase.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(path).data.publicUrl : undefined;
 }
 
 type ProjectDraft = {
@@ -102,7 +194,7 @@ function Logo() {
   return <div className="logo">OI</div>;
 }
 
-function Header({ screen, go }: { screen: Screen; go: (s: Screen) => void }) {
+function Header({ screen, go, user, onOpenAuth, onSignOut }: { screen: Screen; go: (s: Screen) => void; user: User | null; onOpenAuth: () => void; onSignOut: () => void }) {
   return (
     <header>
       <button className="brand" onClick={() => go("home")}><Logo /><b>Acervo de Projetos</b></button>
@@ -111,7 +203,7 @@ function Header({ screen, go }: { screen: Screen; go: (s: Screen) => void }) {
         <button className={screen === "register" ? "active" : ""} onClick={() => go("register")}>Cadastrar</button>
         <button className={screen === "mine" ? "active" : ""} onClick={() => go("mine")}>Meus Projetos</button>
       </nav>
-      <button className="primary small">Entrar</button>
+      <button className="primary small" title={user?.email ?? "Entrar"} onClick={user ? onSignOut : onOpenAuth}>{user ? "Sair" : "Entrar"}</button>
     </header>
   );
 }
@@ -120,8 +212,8 @@ function Footer() {
   return <footer><div className="brand"><Logo /><span>Acervo de Projetos</span></div><div>Sobre &nbsp;&nbsp;&nbsp; Contato &nbsp;&nbsp;&nbsp; Termos &nbsp;&nbsp;&nbsp; Privacidade</div><div>◉ &nbsp; ◧ &nbsp; in</div></footer>;
 }
 
-function Shell({ children, screen, go }: { children: ReactNode; screen: Screen; go: (s: Screen) => void }) {
-  return <div className="app"><Header screen={screen} go={go} /><main>{children}</main><Footer /></div>;
+function Shell({ children, screen, go, user, onOpenAuth, onSignOut, notice, dismissNotice }: { children: ReactNode; screen: Screen; go: (s: Screen) => void; user: User | null; onOpenAuth: () => void; onSignOut: () => void; notice: string; dismissNotice: () => void }) {
+  return <div className="app"><Header screen={screen} go={go} user={user} onOpenAuth={onOpenAuth} onSignOut={onSignOut} /><main>{notice && <div className="notice" role="status">{notice}<button onClick={dismissNotice} aria-label="Fechar aviso">×</button></div>}{children}</main><Footer /></div>;
 }
 
 function Picture({ large = false }: { large?: boolean }) {
@@ -223,12 +315,13 @@ function Detail({ project, projects, go, openAI, selectProject }: { project: Pro
   const [tab, setTab] = useState("Ficha");
   return <div className="page detail">
     <div className="breadcrumb">Acervo <span>›</span> {project.name}</div>
-    <ProjectHero project={project} openAI={openAI} assume={() => go("continuity")} />
+      {step === 4 && <GenericStep title="Anexos" text="Os arquivos serão enviados ao Supabase Storage ao cadastrar o projeto."><label className="dropzone"><Icon name="upload" size={28} /><b>Selecionar arquivos</b><small>PDF, PNG, JPG ou ZIP; até 10 MB por arquivo.</small><input type="file" accept="application/pdf,image/png,image/jpeg,application/zip" multiple onChange={(e) => { const files = Array.from(e.currentTarget.files ?? []); setSelectedFiles(files); update("attachments", files.map((file) => file.name)); }} /></label>{form.attachments.length > 0 && <p className="muted">{form.attachments.join(", ")}</p>}</GenericStep>}
+      {saveError && <p className="form-error" role="alert">{saveError}</p>}<div className="wizard-actions"><button className="secondary" disabled={step === 0 || saving} onClick={() => setStep(step - 1)}>Voltar</button>{step < 4 ? <button className="primary" onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" disabled={saving} onClick={saveProject}>{saving ? "Enviando..." : "Cadastrar projeto"}</button>}</div>
     <div className="tabs">{["Ficha", "Materiais e métodos", "Histórico de versões"].map((t) => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}</button>)}</div>
     <div className="detail-layout">
       <section>
         {tab === "Ficha" && <><div className="panel"><h3>Sobre o projeto</h3><div className="summary-grid"><Info icon="users" title="Participantes" text={project.team?.length ? `${project.team.length} participante(s)` : "Não informado"} /><Info icon="target" title="Objetivo" text={project.objective || project.description} /><Info icon="chart" title="Resultados" text={project.results || "Ainda não informados."} /></div></div><Team members={project.team ?? []} /></>}
-        {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos registrados</h4>{project.attachments.map((attachment) => <p key={attachment}>{attachment}</p>)}</> : null}</div>}
+        {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos</h4>{project.attachments.map((attachment) => { const href = attachmentUrl(attachment.path); return <p key={attachment.path ?? attachment.name}>{href ? <a href={href} target="_blank" rel="noreferrer">{attachment.name}</a> : attachment.name}</p>; })}</> : null}</div>}
         {tab === "Histórico de versões" && <div className="panel tab-content"><h3>Histórico de versões</h3>{project.versionOf ? <div className="history"><i /><div><b>Nova versão criada</b><p>{projects.find((item) => item.id === project.versionOf)?.name ?? "Projeto original"}</p></div></div> : <p>Nenhuma versão anterior registrada.</p>}</div>}
       </section>
       <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
@@ -248,8 +341,10 @@ function Steps({ labels, current }: { labels: string[]; current: number }) {
   return <div className="steps">{labels.map((label, i) => <div className={`${i <= current ? "done" : ""} ${i === current ? "current" : ""}`} key={label}><span>{i < current ? <Icon name="check" size={14} /> : i + 1}</span><b>{label}</b></div>)}</div>;
 }
 
-function Continuity({ project, initialPlan, onSuccess }: { project: Project; initialPlan: string; onSuccess: (project: Project) => void }) {
+function Continuity({ project, initialPlan, onSuccess }: { project: Project; initialPlan: string; onSuccess: (project: Project) => Promise<void> }) {
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const draftKey = `${CONTINUITY_DRAFT_STORAGE_KEY}${project.id ?? project.name}`;
   const [draft] = useState(() => {
     const initial = { team: project.team?.length ? [...project.team] : [""], form: { class: "", objective: initialPlan, plan: initialPlan, dueDate: "" } };
@@ -278,17 +373,23 @@ function Continuity({ project, initialPlan, onSuccess }: { project: Project; ini
     plan: form.plan, dueDate: form.dueDate, versionOf: project.id,
     mineStatus: "Em desenvolvimento",
   });
-  const finishVersion = () => {
+  const finishVersion = async () => {
+    setSaving(true);
+    setSaveError("");
     try {
+      await saveVersion();
       window.localStorage.removeItem(draftKey);
-    } catch {}
-    saveVersion();
+    } catch (error) {
+      setSaveError(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   };
   return <div className="page wizard-page"><h2>Continuar projeto</h2><Steps labels={["Projeto", "Equipe", "Plano"]} current={step} /><div className="wizard-layout"><section className="panel wizard-card">
     {step === 0 && <><h3>Informações da nova versão</h3><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => setForm({ ...form, class: e.target.value })} placeholder="Opcional" /></Field><Field label="Objetivo da nova versão *"><textarea value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} placeholder="Descreva as entregas e os objetivos desta etapa..." /></Field></>}
     {step === 1 && <><h3>Participantes</h3><p className="muted">Informe quem participa desta etapa. Este campo é opcional.</p>{team.map((member, i) => <div className="member-input" key={i}><input value={member} onChange={(e) => setTeam(team.map((m, j) => j === i ? e.target.value : m))} placeholder="Nome do participante" />{i > 0 && <button onClick={() => setTeam(team.filter((_, j) => i !== j))}>×</button>}</div>)}<button className="secondary" onClick={() => setTeam([...team, ""])}>+ Adicionar participante</button></>}
     {step === 2 && <><h3>Plano de continuidade</h3><Field label="Descrição do plano *"><textarea value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} placeholder="Liste ações, etapas e próximos passos..." /></Field><Field label="Previsão de conclusão"><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field></>}
-    <div className="wizard-actions"><button className="secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>Voltar</button>{step < 2 ? <button className="primary" disabled={!valid} onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" disabled={!valid} onClick={finishVersion}>Criar nova versão</button>}</div>
+    {saveError && <p className="form-error" role="alert">{saveError}</p>}<div className="wizard-actions"><button className="secondary" disabled={step === 0 || saving} onClick={() => setStep(step - 1)}>Voltar</button>{step < 2 ? <button className="primary" disabled={!valid || saving} onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" disabled={!valid || saving} onClick={finishVersion}>{saving ? "Salvando..." : "Criar nova versão"}</button>}</div>
   </section><Original project={project} /></div></div>;
 }
 
@@ -300,8 +401,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><b>{label}</b>{children}</label>;
 }
 
-function Register({ onSuccess }: { onSuccess: (project: Project) => void }) {
+function Register({ onSuccess }: { onSuccess: (project: Project, files: File[]) => Promise<void> }) {
   const [step, setStep] = useState(0);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const labels = ["Dados gerais", "Participantes", "Objetivos/resultados", "Recursos e métodos", "Anexos"];
   const [form, setForm] = useState<ProjectDraft>(readProjectDraft);
   useEffect(() => {
@@ -313,19 +417,25 @@ function Register({ onSuccess }: { onSuccess: (project: Project) => void }) {
   }, [form]);
   const update = <K extends keyof ProjectDraft,>(key: K, value: ProjectDraft[K]) => setForm((current) => ({ ...current, [key]: value }));
   const valid = step !== 0 || Boolean(form.name.trim() && form.area.trim() && form.description.trim());
-  const saveProject = () => {
+  const saveProject = async () => {
+    setSaving(true);
+    setSaveError("");
     const project: Project = {
       id: crypto.randomUUID(), name: form.name.trim(), class: form.class.trim(), year: form.year.trim(),
       area: form.area.trim(), status: form.status, description: form.description.trim(),
       objective: form.objective.trim(), results: form.results.trim(),
       team: form.team.map((member) => member.trim()).filter(Boolean),
       resources: form.resources.split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
-      tech: [], attachments: form.attachments, mineStatus: "Em desenvolvimento",
+      tech: [], attachments: [], mineStatus: "Em desenvolvimento",
     };
     try {
+      await onSuccess(project, selectedFiles);
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-    } catch {}
-    onSuccess(project);
+    } catch (error) {
+      setSaveError(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   };
   return <div className="page register"><h2>Cadastro de novo projeto</h2><Steps labels={labels} current={step} /><div className="register-layout"><section className="panel wizard-card">
     {step === 0 && <><h3>Dados gerais</h3><Field label="Título do projeto *"><input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ex.: Horta comunitária" /></Field><div className="two-cols"><Field label="Área ou tema *"><input value={form.area} onChange={(e) => update("area", e.target.value)} placeholder="Ex.: cultura, pesquisa, saúde, meio ambiente" /></Field><Field label="Ano"><input value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="Ex.: 2026" /></Field></div><div className="two-cols"><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => update("class", e.target.value)} placeholder="Opcional" /></Field><Field label="Status"><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>Em andamento</option><option>Planejamento</option><option>Concluído</option><option>Pausado</option></select></Field></div><Field label="Descrição *"><textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Conte sobre a iniciativa, seu contexto e o que foi realizado..." /></Field></>}
@@ -344,8 +454,7 @@ function GenericStep({ title, text, children }: { title: string; text: string; c
 function Mine({ projects, go, selectProject }: { projects: Project[]; go: (s: Screen) => void; selectProject: (p: Project) => void }) {
   const [filter, setFilter] = useState("Todos");
   const statuses = ["Todos", "Em desenvolvimento", "Assumidos", "Rascunhos", "Concluídos"];
-  const mapped = projects.map((p, i) => ({ ...p, mineStatus: p.mineStatus ?? ["Concluídos", "Assumidos", "Em desenvolvimento", "Rascunhos", "Em desenvolvimento"][i % 5] }));
-  const shown = filter === "Todos" ? mapped : mapped.filter((p) => p.mineStatus === filter);
+  const shown = filter === "Todos" ? projects : projects.filter((p) => p.mineStatus === filter);
   return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos que você criou ou assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div><div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /></div>)}</div></div>;
 }
 
@@ -366,6 +475,35 @@ function AIPanel({ project, close, usePlan }: { project: Project; close: () => v
   </aside></>;
 }
 
+function AuthModal({ close, onAuthenticated }: { close: () => void; onAuthenticated: (user: User) => void }) {
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [working, setWorking] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    setWorking(true);
+    setMessage("");
+    try {
+      const result = mode === "signin"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password });
+      if (result.error) throw result.error;
+      if (result.data.session) onAuthenticated(result.data.session.user);
+      else setMessage("Conta criada. Confirme seu e-mail para concluir o acesso.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return <><div className="overlay top" onClick={close} /><section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="close" onClick={close} aria-label="Fechar"><Icon name="close" /></button><h2 id="auth-title">{mode === "signin" ? "Entrar" : "Criar conta"}</h2>{supabase ? <form onSubmit={submit}><label className="field"><b>E-mail</b><input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field"><b>Senha</b><input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={6} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{message && <p className="form-error" role="alert">{message}</p>}<button className="primary" disabled={working}>{working ? "Aguarde..." : mode === "signin" ? "Entrar" : "Criar conta"}</button></form> : <p className="muted">Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY em .env.local para habilitar o login.</p>}{supabase && <button className="auth-switch" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMessage(""); }}>{mode === "signin" ? "Ainda não tem conta? Criar conta" : "Já tem conta? Entrar"}</button>}</section></>;
+}
+
 function SuccessModal({ title, text, close }: { title: string; text: string; close: () => void }) {
   return <><div className="overlay top" /><div className="success-modal"><div className="success-check"><Icon name="check" size={28} /></div><h2>{title}</h2><p>{text}</p><button className="primary" onClick={close}>Concluir</button></div></>;
 }
@@ -373,39 +511,138 @@ function SuccessModal({ title, text, close }: { title: string; text: string; clo
 export default function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [query, setQuery] = useState("");
-  const [userProjects, setUserProjects] = useState<Project[]>(readSavedProjects);
+  const [remoteProjects, setRemoteProjects] = useState<Project[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(Boolean(supabase));
+  const [notice, setNotice] = useState(supabase ? "" : "Supabase ainda não está configurado. Crie o arquivo .env.local para habilitar login e salvamento.");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [pendingScreen, setPendingScreen] = useState<Screen | null>(null);
   const [selected, setSelected] = useState(seedProjects[0]);
   const [aiOpen, setAiOpen] = useState(false);
   const [plan, setPlan] = useState("");
   const [success, setSuccess] = useState<null | "version" | "project">(null);
-  const projects = [...userProjects, ...seedProjects];
+  const projects = [...remoteProjects, ...seedProjects];
+  const mineProjects = user ? remoteProjects.filter((project) => project.ownerId === user.id) : [];
+
   useEffect(() => {
-    try {
-      window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(userProjects));
-    } catch {
+    if (!supabase) return;
+    let active = true;
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setNotice(error.message);
+      setUser(data.session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setUser(session?.user ?? null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) {
+      setLoadingProjects(false);
       return;
     }
-  }, [userProjects]);
-  const go = (s: Screen) => { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    let active = true;
+    const loadProjects = async () => {
+      setLoadingProjects(true);
+      if (user) {
+        const localProjects = readSavedProjects();
+        if (localProjects.length) {
+          const rows = localProjects.map((project) => projectToRow({
+            ...project,
+            id: project.id ?? crypto.randomUUID(),
+            attachments: normalizeAttachments(project.attachments),
+          }, user.id));
+          const { error: migrationError } = await supabase.from("projects").upsert(rows, { onConflict: "id" });
+          if (migrationError) setNotice(`Não foi possível importar os projetos deste navegador: ${migrationError.message}`);
+          else {
+            window.localStorage.removeItem(LEGACY_PROJECTS_STORAGE_KEY);
+            setNotice(`${localProjects.length} projeto(s) local(is) importado(s) para o Supabase.`);
+          }
+        }
+      }
+      const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
+      if (!active) return;
+      if (error) setNotice(`Erro ao carregar o acervo: ${error.message}`);
+      else setRemoteProjects((data ?? []).map((row) => projectFromRow(row as ProjectRow)));
+      setLoadingProjects(false);
+    };
+    void loadProjects();
+    return () => { active = false; };
+  }, [user?.id]);
+
+  const go = (nextScreen: Screen) => {
+    if (nextScreen === "register" || nextScreen === "mine" || nextScreen === "continuity") {
+      if (!supabase) {
+        setNotice("Configure a URL e a chave publishable do Supabase no arquivo .env.local primeiro.");
+        return;
+      }
+      if (!user) {
+        setPendingScreen(nextScreen);
+        setAuthOpen(true);
+        return;
+      }
+    }
+    setScreen(nextScreen);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const selectProject = (p: Project) => { setSelected(p); setScreen("detail"); window.scrollTo(0, 0); };
-  const saveProject = (project: Project) => {
-    setUserProjects((current) => [project, ...current]);
-    setSelected(project);
-    setSuccess("project");
+  const persistProject = async (project: Project, files: File[], successType: "version" | "project") => {
+    if (!supabase) throw new Error("Configure a conexão com o Supabase antes de salvar.");
+    if (!user) throw new Error("Entre na sua conta para salvar projetos.");
+    const id = project.id ?? crypto.randomUUID();
+    const uploadedPaths: string[] = [];
+    try {
+      const attachments: ProjectAttachment[] = [];
+      for (const file of files) {
+        if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} excede o limite de 10 MB.`);
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `${user.id}/${id}/${crypto.randomUUID()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(path, file, { contentType: file.type });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        attachments.push({ name: file.name, path });
+      }
+      const savedProject = { ...project, id, ownerId: user.id, attachments };
+      const { data, error } = await supabase.from("projects").insert(projectToRow(savedProject, user.id)).select("*").single();
+      if (error) throw error;
+      const persisted = projectFromRow(data as ProjectRow);
+      setRemoteProjects((current) => [persisted, ...current.filter((item) => item.id !== persisted.id)]);
+      setSelected(persisted);
+      setSuccess(successType);
+    } catch (error) {
+      if (uploadedPaths.length) await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+      throw error;
+    }
   };
-  const saveVersion = (project: Project) => {
-    setUserProjects((current) => [project, ...current]);
-    setSelected(project);
-    setSuccess("version");
+  const saveProject = (project: Project, files: File[]) => persistProject(project, files, "project");
+  const saveVersion = (project: Project) => persistProject(project, [], "version");
+  const handleAuthenticated = (authenticatedUser: User) => {
+    setUser(authenticatedUser);
+    setAuthOpen(false);
+    if (pendingScreen) setScreen(pendingScreen);
+    setPendingScreen(null);
   };
-  return <Shell screen={screen} go={go}>
+  const signOut = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) setNotice(error.message);
+    else { setScreen("home"); setNotice("Você saiu da sua conta."); }
+  };
+  return <Shell screen={screen} go={go} user={user} onOpenAuth={() => setAuthOpen(true)} onSignOut={signOut} notice={notice} dismissNotice={() => setNotice("")}>
+    {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
     {screen === "detail" && <Detail project={selected} projects={projects} go={go} openAI={() => setAiOpen(true)} selectProject={selectProject} />}
     {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
-    {screen === "mine" && <Mine projects={projects} go={go} selectProject={selectProject} />}
+    {screen === "mine" && <Mine projects={mineProjects} go={go} selectProject={selectProject} />}
     {aiOpen && <AIPanel project={selected} close={() => setAiOpen(false)} usePlan={(value) => { setPlan(value); setAiOpen(false); go("continuity"); }} />}
+    {authOpen && <AuthModal close={() => setAuthOpen(false)} onAuthenticated={handleAuthenticated} />}
     {success && <SuccessModal title={success === "version" ? "Nova versão criada com sucesso!" : "Projeto cadastrado com sucesso!"} text={success === "version" ? "O projeto já está disponível em Meus Projetos." : "A ficha do projeto foi criada e já pode ser acessada."} close={() => { setSuccess(null); go("mine"); }} />}
   </Shell>;
 }
