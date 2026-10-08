@@ -31,7 +31,13 @@ create policy "Anyone can read projects"
 drop policy if exists "Users can create their own projects" on public.projects;
 create policy "Users can create their own projects"
   on public.projects for insert to authenticated
-  with check (auth.uid() = owner_id);
+  with check (
+    auth.uid() = owner_id
+    and (
+      lower(coalesce(auth.jwt() ->> 'email', '')) like '%@ifsc.edu.br'
+      or lower(coalesce(auth.jwt() ->> 'email', '')) like '%@aluno.ifsc.edu.br'
+    )
+  );
 
 drop policy if exists "Users can update their own projects" on public.projects;
 create policy "Users can update their own projects"
@@ -67,6 +73,10 @@ create policy "Users can upload their own project attachments"
   with check (
     bucket_id = 'project-attachments'
     and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      lower(coalesce(auth.jwt() ->> 'email', '')) like '%@ifsc.edu.br'
+      or lower(coalesce(auth.jwt() ->> 'email', '')) like '%@aluno.ifsc.edu.br'
+    )
   );
 
 drop policy if exists "Users can update their own project attachments" on storage.objects;
@@ -75,10 +85,18 @@ create policy "Users can update their own project attachments"
   using (
     bucket_id = 'project-attachments'
     and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      lower(coalesce(auth.jwt() ->> 'email', '')) like '%@ifsc.edu.br'
+      or lower(coalesce(auth.jwt() ->> 'email', '')) like '%@aluno.ifsc.edu.br'
+    )
   )
   with check (
     bucket_id = 'project-attachments'
     and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      lower(coalesce(auth.jwt() ->> 'email', '')) like '%@ifsc.edu.br'
+      or lower(coalesce(auth.jwt() ->> 'email', '')) like '%@aluno.ifsc.edu.br'
+    )
   );
 
 drop policy if exists "Users can delete their own project attachments" on storage.objects;

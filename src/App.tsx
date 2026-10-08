@@ -37,6 +37,12 @@ const seedProjects: Project[] = [
 const LEGACY_PROJECTS_STORAGE_KEY = "acervo-projetos:projects";
 const DRAFT_STORAGE_KEY = "acervo-projetos:draft";
 const CONTINUITY_DRAFT_STORAGE_KEY = "acervo-projetos:continuity:";
+const IFSC_EMAIL_DOMAINS = ["ifsc.edu.br", "aluno.ifsc.edu.br"];
+
+function isIfscEmail(email: string | null | undefined) {
+  const normalizedEmail = email?.trim().toLowerCase() ?? "";
+  return IFSC_EMAIL_DOMAINS.some((domain) => normalizedEmail.endsWith(`@${domain}`));
+}
 
 function readSavedProjects(): Project[] {
   try {
@@ -485,12 +491,17 @@ function AuthModal({ close, onAuthenticated }: { close: () => void; onAuthentica
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase) return;
-    setWorking(true);
     setMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (mode === "signup" && !isIfscEmail(normalizedEmail)) {
+      setMessage("Use seu e-mail institucional do IFSC para criar uma conta.");
+      return;
+    }
+    setWorking(true);
     try {
       const result = mode === "signin"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+        ? await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+        : await supabase.auth.signUp({ email: normalizedEmail, password });
       if (result.error) throw result.error;
       if (result.data.session) onAuthenticated(result.data.session.user);
       else setMessage("Conta criada. Confirme seu e-mail para concluir o acesso.");
@@ -586,6 +597,10 @@ export default function App() {
         setAuthOpen(true);
         return;
       }
+      if ((nextScreen === "register" || nextScreen === "continuity") && !isIfscEmail(user.email)) {
+        setNotice("Use uma conta com e-mail institucional do IFSC para publicar projetos.");
+        return;
+      }
     }
     setScreen(nextScreen);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -594,6 +609,7 @@ export default function App() {
   const persistProject = async (project: Project, files: File[], successType: "version" | "project") => {
     if (!supabase) throw new Error("Configure a conexão com o Supabase antes de salvar.");
     if (!user) throw new Error("Entre na sua conta para salvar projetos.");
+    if (!isIfscEmail(user.email)) throw new Error("Use uma conta com e-mail institucional do IFSC para publicar projetos.");
     const id = project.id ?? crypto.randomUUID();
     const uploadedPaths: string[] = [];
     try {
@@ -624,7 +640,10 @@ export default function App() {
   const handleAuthenticated = (authenticatedUser: User) => {
     setUser(authenticatedUser);
     setAuthOpen(false);
-    if (pendingScreen) setScreen(pendingScreen);
+    if (pendingScreen === "register" || pendingScreen === "continuity") {
+      if (isIfscEmail(authenticatedUser.email)) setScreen(pendingScreen);
+      else setNotice("Use uma conta com e-mail institucional do IFSC para publicar projetos.");
+    } else if (pendingScreen) setScreen(pendingScreen);
     setPendingScreen(null);
   };
   const signOut = async () => {
