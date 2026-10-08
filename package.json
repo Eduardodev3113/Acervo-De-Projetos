@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs",
+    "api": "node --env-file-if-exists=.env.local server/index.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"
