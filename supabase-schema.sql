@@ -7,6 +7,7 @@ create table if not exists public.projects (
   tech text[] not null default '{}',
   resources text[] not null default '{}',
   area text not null default '',
+  oi_core text not null default '',
   status text not null,
   description text not null,
   objective text not null default '',
@@ -18,6 +19,27 @@ create table if not exists public.projects (
   plan text not null default '',
   due_date date,
   created_at timestamptz not null default now()
+);
+
+alter table public.projects add column if not exists oi_core text not null default '';
+
+update public.projects
+set oi_core = 'OI 3 - Sustentabilidade'
+where id in (
+  'a1000000-0000-4000-8000-000000000001'::uuid,
+  'a1000000-0000-4000-8000-000000000002'::uuid,
+  'a1000000-0000-4000-8000-000000000003'::uuid,
+  'a1000000-0000-4000-8000-000000000004'::uuid,
+  'a1000000-0000-4000-8000-000000000005'::uuid,
+  'a1000000-0000-4000-8000-000000000006'::uuid,
+  'a1000000-0000-4000-8000-000000000007'::uuid,
+  'a1000000-0000-4000-8000-000000000008'::uuid,
+  'a1000000-0000-4000-8000-000000000009'::uuid,
+  'a1000000-0000-4000-8000-000000000010'::uuid,
+  'a1000000-0000-4000-8000-000000000011'::uuid,
+  'a1000000-0000-4000-8000-000000000012'::uuid,
+  'a1000000-0000-4000-8000-000000000013'::uuid,
+  'a1000000-0000-4000-8000-000000000014'::uuid
 );
 
 create unique index if not exists projects_one_active_version_per_parent
@@ -146,9 +168,16 @@ create policy "Users can update their own projects"
   using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
 drop policy if exists "Users can delete their own projects" on public.projects;
-create policy "Users can delete their own projects"
+drop policy if exists "Project owners and admins can delete projects" on public.projects;
+create policy "Project owners and admins can delete projects"
   on public.projects for delete to authenticated
-  using (auth.uid() = owner_id);
+  using (
+    auth.uid() = owner_id
+    or lower(coalesce(auth.jwt() ->> 'email', '')) in (
+      'eduardo.r2008@aluno.ifsc.edu.br',
+      'vinicius.amf20@aluno.ifsc.edu.br'
+    )
+  );
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -201,9 +230,16 @@ create policy "Users can update their own project attachments"
   );
 
 drop policy if exists "Users can delete their own project attachments" on storage.objects;
-create policy "Users can delete their own project attachments"
+drop policy if exists "Project owners and admins can delete project attachments" on storage.objects;
+create policy "Project owners and admins can delete project attachments"
   on storage.objects for delete to authenticated
   using (
     bucket_id = 'project-attachments'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and (
+      (storage.foldername(name))[1] = auth.uid()::text
+      or lower(coalesce(auth.jwt() ->> 'email', '')) in (
+        'eduardo.r2008@aluno.ifsc.edu.br',
+        'vinicius.amf20@aluno.ifsc.edu.br'
+      )
+    )
   );

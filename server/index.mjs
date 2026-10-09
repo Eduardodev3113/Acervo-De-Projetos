@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { handleProjectsApi } from "./supabase-projects.mjs";
 
 const port = Number(process.env.AI_API_PORT) || 3002;
 const rateLimitWindowMs = 60_000;
@@ -73,6 +74,7 @@ function parseSuggestions(content) {
 }
 
 const server = createServer(async (request, response) => {
+  if (await handleProjectsApi(request, response)) return;
   if (request.method !== "POST" || request.url !== "/api/ai/suggestions") {
     sendJson(response, 404, { error: "Endpoint não encontrado." });
     return;

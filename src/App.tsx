@@ -14,6 +14,7 @@ type Project = {
   tech: string[];
   resources?: string[];
   area?: string;
+  oiCore?: string;
   status: string;
   description: string;
   objective?: string;
@@ -26,23 +27,21 @@ type Project = {
   dueDate?: string;
 };
 
-const seedProjects: Project[] = [
-  { id: "seed-saude", name: "App Saúde+", class: "2023.2", year: "2023", tech: ["React", "Node.js", "PostgreSQL"], status: "Concluído", description: "Aplicativo para gestão de saúde e agendamento de consultas." },
-  { id: "seed-ecotrack", name: "EcoTrack", class: "2023.1", year: "2023", tech: ["Python", "AWS"], status: "Concluído", description: "Sistema de monitoramento ambiental com IoT e análise de dados." },
-  { id: "seed-conecta", name: "Conecta+", class: "2022.2", year: "2022", tech: ["Flutter", "Firebase"], status: "Em andamento", description: "Plataforma de conexão entre estudantes e oportunidades." },
-  { id: "seed-campus", name: "Smart Campus", class: "2021.1", year: "2021", tech: ["React", "PostgreSQL"], status: "Disponível para continuar", description: "Sistema de gestão inteligente para campus universitário." },
-  { id: "seed-vidafit", name: "VidaFit", class: "2024.1", year: "2024", tech: ["React", "Node.js"], status: "Em andamento", description: "Experiência de bem-estar e hábitos saudáveis para estudantes." },
-];
-
 const LEGACY_PROJECTS_STORAGE_KEY = "acervo-projetos:projects";
 const DRAFT_STORAGE_KEY = "acervo-projetos:draft";
 const CONTINUITY_DRAFT_STORAGE_KEY = "acervo-projetos:continuity:";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IFSC_EMAIL_DOMAINS = ["ifsc.edu.br", "aluno.ifsc.edu.br"];
+const PROJECT_ADMIN_EMAILS = ["eduardo.r2008@aluno.ifsc.edu.br", "vinicius.amf20@aluno.ifsc.edu.br"];
+const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4"];
 
 function isIfscEmail(email: string | null | undefined) {
   const normalizedEmail = email?.trim().toLowerCase() ?? "";
   return IFSC_EMAIL_DOMAINS.some((domain) => normalizedEmail.endsWith(`@${domain}`));
+}
+
+function isProjectAdmin(email: string | null | undefined) {
+  return PROJECT_ADMIN_EMAILS.includes(email?.trim().toLowerCase() ?? "");
 }
 
 function readSavedProjects(): Project[] {
@@ -67,6 +66,7 @@ type ProjectRow = {
   tech: string[];
   resources: string[];
   area: string;
+  oi_core: string;
   status: string;
   description: string;
   objective: string;
@@ -101,6 +101,7 @@ function projectFromRow(row: ProjectRow): Project {
     tech: row.tech ?? [],
     resources: row.resources ?? [],
     area: row.area,
+    oiCore: row.oi_core ?? "",
     status: row.status,
     description: row.description,
     objective: row.objective,
@@ -124,6 +125,7 @@ function projectToRow(project: Project, ownerId: string) {
     tech: project.tech,
     resources: project.resources ?? [],
     area: project.area ?? "",
+    oi_core: project.oiCore ?? "",
     status: project.status,
     description: project.description,
     objective: project.objective ?? "",
@@ -141,6 +143,20 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Não foi possível concluir a operação.";
 }
 
+async function requestProjectsApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (!supabase) throw new Error("Configure o Supabase antes de acessar os projetos.");
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const headers = new Headers(options.headers);
+  if (data.session?.access_token) headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+
+  const response = await fetch(`/api${path}`, { ...options, headers });
+  const result = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(result.error || `A API de projetos respondeu com HTTP ${response.status}.`);
+  return result as T;
+}
+
 function projectResources(project: Project) {
   return project.resources?.length ? project.resources : project.tech;
 }
@@ -154,6 +170,7 @@ type ProjectDraft = {
   class: string;
   year: string;
   area: string;
+  oiCore: string;
   status: string;
   description: string;
   objective: string;
@@ -165,7 +182,7 @@ type ProjectDraft = {
 
 function readProjectDraft(): ProjectDraft {
   const emptyDraft: ProjectDraft = {
-    name: "", class: "", year: String(new Date().getFullYear()), area: "",
+    name: "", class: "", year: String(new Date().getFullYear()), area: "", oiCore: "",
     status: "Em andamento", description: "", objective: "", results: "",
     team: [""], resources: "", attachments: [],
   };
@@ -257,7 +274,7 @@ function ProjectCard({ project, onClick }: { project: Project; onClick: () => vo
       <Picture />
       <div className="card-copy">
         <div className="project-title"><b>{project.name}</b><span className="status-dot" /></div>
-        <small>{[project.area, project.class && `Turma ${project.class}`, project.year].filter(Boolean).join(" · ") || "Projeto"}</small>
+          <small>{[project.oiCore?.split(" - ")[0], project.area, project.class && `Turma ${project.class}`, project.year].filter(Boolean).join(" · ") || "Projeto"}</small>
         <Tags items={projectResources(project)} />
         <p>{project.description}</p>
       </div>
@@ -295,16 +312,24 @@ function Home({ projects, go, setSearch, selectProject }: { projects: Project[];
   );
 }
 
-function FilterGroup({ title, options, selected, onSelect }: { title: string; options: string[]; selected: string; onSelect: (v: string) => void }) {
-  return <div className="filter-group"><b>{title}</b>{options.map((o) => <label key={o}><input type="radio" checked={selected === o} onChange={() => onSelect(o)} /> <span>{o}</span></label>)}</div>;
+function FilterGroup({ title, options, selected, onSelect, collapsed, onToggle }: { title: string; options: string[]; selected: string; onSelect: (v: string) => void; collapsed: boolean; onToggle: () => void }) {
+  return <div className={`filter-group ${collapsed ? "collapsed" : ""}`}>
+    <div className="filter-group-header">
+      <b>{title}</b>
+      <button type="button" className="filter-mini-toggle" onClick={onToggle} aria-label={collapsed ? `Expandir ${title}` : `Recolher ${title}`}>{collapsed ? "▸" : "▾"}</button>
+    </div>
+    {!collapsed && <div className="filter-options">{options.map((o) => <label key={o}><input type="radio" checked={selected === o} onChange={() => onSelect(o)} /> <span>{o}</span></label>)}</div>}
+  </div>;
 }
 
 function Archive({ projects, go, query, setQuery, selectProject }: { projects: Project[]; go: (s: Screen) => void; query: string; setQuery: (v: string) => void; selectProject: (p: Project) => void }) {
   const [classFilter, setClassFilter] = useState("Todas");
   const [year, setYear] = useState("Todos");
+  const [oiCore, setOiCore] = useState("Todos");
   const [tech, setTech] = useState("Todas");
   const [status, setStatus] = useState("Todos");
   const [sort, setSort] = useState("Mais recentes");
+  const [groupCollapsed, setGroupCollapsed] = useState({ class: false, year: false, oiCore: false, tech: false, status: false });
   const classOptions = ["Todas", ...new Set(projects.map((project) => project.class).filter(Boolean))];
   const yearOptions = ["Todos", ...new Set(projects.map((project) => project.year).filter(Boolean))];
   const resourceOptions = ["Todas", ...new Set(projects.flatMap(projectResources))];
@@ -314,19 +339,30 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
       (!q || `${p.name} ${p.area ?? ""} ${projectResources(p).join(" ")} ${p.class} ${p.description} ${p.objective ?? ""}`.toLowerCase().includes(q)) &&
       (classFilter === "Todas" || p.class === classFilter) &&
       (year === "Todos" || p.year === year) &&
+      (oiCore === "Todos" || p.oiCore === oiCore) &&
       (tech === "Todas" || projectResources(p).includes(tech)) &&
       (status === "Todos" || p.status === status)
     ).sort((a, b) => sort === "A–Z" ? a.name.localeCompare(b.name) : sort === "Mais antigos" ? a.year.localeCompare(b.year) : b.year.localeCompare(a.year));
-  }, [projects, query, classFilter, year, tech, status, sort]);
+  }, [projects, query, classFilter, year, oiCore, tech, status, sort]);
+  const toggleGroup = (key: keyof typeof groupCollapsed) => setGroupCollapsed((current) => ({ ...current, [key]: !current[key] }));
   const open = (p: Project) => { selectProject(p); go("detail"); };
   return (
     <div className="page archive">
       <div className="wide-search"><Icon name="search" size={17} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nome, tema, recurso ou grupo..." /><button><Icon name="search" size={18} /></button></div>
       <div className="archive-layout">
-        <aside className="filters"><h3>Filtros</h3><FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={setClassFilter} /><FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={setYear} /><FilterGroup title="Recursos" options={resourceOptions} selected={tech} onSelect={setTech} /><FilterGroup title="Status" options={["Todos", ...new Set(projects.map((project) => project.status))]} selected={status} onSelect={setStatus} /></aside>
+        <aside className="filters">
+          <h3>Filtros</h3>
+          <div className="filter-content">
+            <FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={setClassFilter} collapsed={groupCollapsed.class} onToggle={() => toggleGroup("class")} />
+            <FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={setYear} collapsed={groupCollapsed.year} onToggle={() => toggleGroup("year")} />
+            <FilterGroup title="Núcleo OI" options={["Todos", ...OI_CORE_OPTIONS]} selected={oiCore} onSelect={setOiCore} collapsed={groupCollapsed.oiCore} onToggle={() => toggleGroup("oiCore")} />
+            <FilterGroup title="Recursos" options={resourceOptions} selected={tech} onSelect={setTech} collapsed={groupCollapsed.tech} onToggle={() => toggleGroup("tech")} />
+            <FilterGroup title="Status" options={["Todos", ...new Set(projects.map((project) => project.status))]} selected={status} onSelect={setStatus} collapsed={groupCollapsed.status} onToggle={() => toggleGroup("status")} />
+          </div>
+        </aside>
         <section className="results">
           <div className="result-head"><b>{filtered.length} resultados encontrados</b><label>Ordenar por: <select value={sort} onChange={(e) => setSort(e.target.value)}><option>Mais recentes</option><option>Mais antigos</option><option>A–Z</option></select></label></div>
-          {filtered.length ? <div className="cards-grid">{filtered.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter("Todas"); setYear("Todos"); setTech("Todas"); setStatus("Todos"); }}>Limpar filtros</button></div>}
+          {filtered.length ? <div className="cards-grid">{filtered.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter("Todas"); setYear("Todos"); setOiCore("Todos"); setTech("Todas"); setStatus("Todos"); }}>Limpar filtros</button></div>}
           <div className="pagination"><button>‹</button><button className="selected">1</button><button>2</button><button>3</button><button>4</button><button>›</button></div>
         </section>
       </div>
@@ -334,21 +370,21 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
   );
 }
 
-function ProjectHero({ project, openAI, assume, claiming }: { project: Project; openAI: () => void; assume: () => void; claiming: boolean }) {
+function ProjectHero({ project, openAI, assume, claiming, canDelete, canAbandon, actionBusy, onDelete, onAbandon }: { project: Project; openAI: () => void; assume: () => void; claiming: boolean; canDelete: boolean; canAbandon: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void }) {
   const claimable = Boolean(project.id && UUID_PATTERN.test(project.id) && project.status !== "Em andamento");
   const claimTitle = !project.id || !UUID_PATTERN.test(project.id)
     ? "Somente projetos publicados no acervo podem ser assumidos."
     : project.status === "Em andamento"
       ? "Este projeto já está em andamento."
       : "Assumir projeto";
-  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões IA</button></div></div>;
+  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões IA</button>{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}</div></div>;
 }
 
-function Detail({ project, projects, openAI, onAssume, claiming, selectProject }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; claiming: boolean; selectProject: (p: Project) => void }) {
+function Detail({ project, projects, openAI, onAssume, claiming, selectProject, canDelete, canAbandon, actionBusy, onDelete, onAbandon }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void }) {
   const [tab, setTab] = useState("Ficha");
   return <div className="page detail">
     <div className="breadcrumb">Acervo <span>›</span> {project.name}</div>
-    <ProjectHero project={project} openAI={openAI} assume={onAssume} claiming={claiming} />
+    <ProjectHero project={project} openAI={openAI} assume={onAssume} claiming={claiming} canDelete={canDelete} canAbandon={canAbandon} actionBusy={actionBusy} onDelete={onDelete} onAbandon={onAbandon} />
     <div className="tabs">{["Ficha", "Materiais e métodos", "Histórico de versões"].map((t) => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}</button>)}</div>
     <div className="detail-layout">
       <section>
@@ -356,7 +392,7 @@ function Detail({ project, projects, openAI, onAssume, claiming, selectProject }
         {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos</h4>{project.attachments.map((attachment) => { const href = attachmentUrl(attachment.path); return <p key={attachment.path ?? attachment.name}>{href ? <a href={href} target="_blank" rel="noreferrer">{attachment.name}</a> : attachment.name}</p>; })}</> : null}</div>}
         {tab === "Histórico de versões" && <div className="panel tab-content"><h3>Histórico de versões</h3>{project.versionOf ? <div className="history"><i /><div><b>Nova versão criada</b><p>{projects.find((item) => item.id === project.versionOf)?.name ?? "Projeto original"}</p></div></div> : <p>Nenhuma versão anterior registrada.</p>}</div>}
       </section>
-      <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
+      <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Núcleo OI</small><b>{project.oiCore || "Não informado"}</b><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
     </div>
   </div>;
 }
@@ -394,10 +430,10 @@ function Continuity({ project, initialPlan, onSuccess, onCancel }: { project: Pr
     if (!supabase || !project.id || !UUID_PATTERN.test(project.id)) return;
     let active = true;
     const interval = window.setInterval(() => {
-      void supabase.rpc("renew_project_claim", { target_project_id: project.id }).then(({ error }) => {
-        if (active && error) {
+      void requestProjectsApi(`/projects/${project.id}/claim/renew`, { method: "POST" }).catch((error: unknown) => {
+        if (active) {
           setClaimValid(false);
-          setSaveError("A reserva deste projeto expirou. Volte ao acervo e tente assumir novamente.");
+          setSaveError(errorMessage(error));
         }
       });
     }, 4 * 60 * 1000);
@@ -413,7 +449,7 @@ function Continuity({ project, initialPlan, onSuccess, onCancel }: { project: Pr
   const valid = step === 0 ? !!form.objective.trim() : step === 2 ? !!form.plan.trim() : true;
   const saveVersion = () => onSuccess({
     id: crypto.randomUUID(), name: `${project.name} (nova versão)`, class: form.class,
-    year: String(new Date().getFullYear()), tech: project.tech, resources: projectResources(project),
+    year: String(new Date().getFullYear()), tech: project.tech, resources: projectResources(project), oiCore: project.oiCore,
     area: project.area, status: "Em andamento", description: form.objective,
     objective: form.objective, team: team.map((member) => member.trim()).filter(Boolean),
     plan: form.plan, dueDate: form.dueDate, versionOf: project.id,
@@ -462,13 +498,13 @@ function Register({ onSuccess }: { onSuccess: (project: Project, files: File[]) 
     }
   }, [form]);
   const update = <K extends keyof ProjectDraft,>(key: K, value: ProjectDraft[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const valid = step !== 0 || Boolean(form.name.trim() && form.area.trim() && form.description.trim());
+  const valid = step !== 0 || Boolean(form.name.trim() && form.area.trim() && form.oiCore && form.description.trim());
   const saveProject = async () => {
     setSaving(true);
     setSaveError("");
     const project: Project = {
       id: crypto.randomUUID(), name: form.name.trim(), class: form.class.trim(), year: form.year.trim(),
-      area: form.area.trim(), status: form.status, description: form.description.trim(),
+      area: form.area.trim(), oiCore: form.oiCore, status: form.status, description: form.description.trim(),
       objective: form.objective.trim(), results: form.results.trim(),
       team: form.team.map((member) => member.trim()).filter(Boolean),
       resources: form.resources.split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
@@ -484,7 +520,7 @@ function Register({ onSuccess }: { onSuccess: (project: Project, files: File[]) 
     }
   };
   return <div className="page register"><h2>Cadastro de novo projeto</h2><Steps labels={labels} current={step} /><div className="register-layout"><section className="panel wizard-card">
-    {step === 0 && <><h3>Dados gerais</h3><Field label="Título do projeto *"><input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ex.: Horta comunitária" /></Field><div className="two-cols"><Field label="Área ou tema *"><input value={form.area} onChange={(e) => update("area", e.target.value)} placeholder="Ex.: cultura, pesquisa, saúde, meio ambiente" /></Field><Field label="Ano"><input value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="Ex.: 2026" /></Field></div><div className="two-cols"><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => update("class", e.target.value)} placeholder="Opcional" /></Field><Field label="Status"><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>Em andamento</option><option>Planejamento</option><option>Concluído</option><option>Pausado</option></select></Field></div><Field label="Descrição *"><textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Conte sobre a iniciativa, seu contexto e o que foi realizado..." /></Field></>}
+    {step === 0 && <><h3>Dados gerais</h3><Field label="Título do projeto *"><input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ex.: Horta comunitária" /></Field><div className="two-cols"><Field label="Área ou tema *"><input value={form.area} onChange={(e) => update("area", e.target.value)} placeholder="Ex.: cultura, pesquisa, saúde, meio ambiente" /></Field><Field label="Ano"><input value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="Ex.: 2026" /></Field></div><div className="two-cols"><Field label="Núcleo OI *"><select value={form.oiCore} onChange={(e) => update("oiCore", e.target.value)}><option value="">Selecione</option>{OI_CORE_OPTIONS.map((option) => <option key={option} value={option}>{option === "OI 3 - Sustentabilidade" ? "OI 3 · Sustentabilidade" : option}</option>)}</select></Field><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => update("class", e.target.value)} placeholder="Opcional" /></Field></div><Field label="Status"><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>Em andamento</option><option>Planejamento</option><option>Concluído</option><option>Pausado</option></select></Field><Field label="Descrição *"><textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Conte sobre a iniciativa, seu contexto e o que foi realizado..." /></Field></>}
     {step === 1 && <GenericStep title="Participantes" text="Adicione pessoas responsáveis ou colaboradoras. Este campo é opcional.">{form.team.map((member, index) => <div className="member-input" key={index}><input value={member} onChange={(e) => update("team", form.team.map((item, i) => i === index ? e.target.value : item))} placeholder="Nome do participante" />{index > 0 && <button onClick={() => update("team", form.team.filter((_, i) => i !== index))}>×</button>}</div>)}<button className="secondary" onClick={() => update("team", [...form.team, ""])}>+ Adicionar participante</button></GenericStep>}
     {step === 2 && <GenericStep title="Objetivos e resultados" text="Registre o propósito e os resultados alcançados."><Field label="Objetivos"><textarea value={form.objective} onChange={(e) => update("objective", e.target.value)} placeholder="O que o projeto busca transformar, investigar ou realizar?" /></Field><Field label="Resultados e aprendizados"><textarea value={form.results} onChange={(e) => update("results", e.target.value)} placeholder="Descreva resultados, impactos e aprendizados..." /></Field></GenericStep>}
     {step === 3 && <GenericStep title="Recursos e métodos" text="Registre o que foi usado ou desenvolvido, seja material, técnica ou ferramenta."><Field label="Materiais, ferramentas, métodos e referências"><textarea value={form.resources} onChange={(e) => update("resources", e.target.value)} placeholder="Ex.: entrevistas, sementes, câmera, laboratório, oficina de escrita, Python... Separe os itens por vírgula ou linha." /></Field></GenericStep>}
@@ -497,11 +533,11 @@ function GenericStep({ title, text, children }: { title: string; text: string; c
   return <><h3>{title}</h3><p className="muted">{text}</p>{children}</>;
 }
 
-function Mine({ projects, go, selectProject }: { projects: Project[]; go: (s: Screen) => void; selectProject: (p: Project) => void }) {
+function Mine({ projects, go, selectProject, onDeleteProject, onAbandonContinuation, actionPendingId }: { projects: Project[]; go: (s: Screen) => void; selectProject: (p: Project) => void; onDeleteProject: (project: Project) => void; onAbandonContinuation: (project: Project) => void; actionPendingId: string | null }) {
   const [filter, setFilter] = useState("Todos");
-  const statuses = ["Todos", "Em desenvolvimento", "Assumidos", "Rascunhos", "Concluídos"];
+  const statuses = ["Todos", "Em desenvolvimento", "Assumidos", "Abandonados", "Rascunhos", "Concluídos"];
   const shown = filter === "Todos" ? projects : projects.filter((p) => p.mineStatus === filter);
-  return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos que você criou ou assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div><div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /></div>)}</div></div>;
+  return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos que você criou ou assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div><div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /><div className="mine-project-actions">{p.versionOf && ["Em andamento", "Planejamento"].includes(p.status) && <button className="secondary" disabled={actionPendingId === p.id} onClick={() => onAbandonContinuation(p)}>{actionPendingId === p.id ? "Aguarde..." : "Abandonar continuação"}</button>}<button className="danger" disabled={actionPendingId === p.id} onClick={() => onDeleteProject(p)}>{actionPendingId === p.id ? "Aguarde..." : "Excluir projeto"}</button></div></div>)}</div></div>;
 }
 
 type Suggestion = { id: number; title: string; text: string; added: boolean };
@@ -598,11 +634,12 @@ export default function App() {
   const [pendingScreen, setPendingScreen] = useState<Screen | null>(null);
   const [claimingProjectId, setClaimingProjectId] = useState<string | null>(null);
   const [claimedProjectId, setClaimedProjectId] = useState<string | null>(null);
-  const [selected, setSelected] = useState(seedProjects[0]);
+  const [projectActionId, setProjectActionId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Project>({ name: "", class: "", year: "", tech: [], status: "", description: "" });
   const [aiOpen, setAiOpen] = useState(false);
   const [plan, setPlan] = useState("");
   const [success, setSuccess] = useState<null | "version" | "project">(null);
-  const projects = [...remoteProjects, ...seedProjects];
+  const projects = remoteProjects;
   const mineProjects = user ? remoteProjects.filter((project) => project.ownerId === user.id) : [];
 
   useEffect(() => {
@@ -646,27 +683,30 @@ export default function App() {
     let active = true;
     const loadProjects = async () => {
       setLoadingProjects(true);
-      if (user) {
-        const localProjects = readSavedProjects();
-        if (localProjects.length) {
-          const rows = localProjects.map((project) => projectToRow({
-            ...project,
-            id: project.id ?? crypto.randomUUID(),
-            attachments: normalizeAttachments(project.attachments),
-          }, user.id));
-          const { error: migrationError } = await supabase.from("projects").upsert(rows, { onConflict: "id" });
-          if (migrationError) setNotice(`Não foi possível importar os projetos deste navegador: ${migrationError.message}`);
-          else {
+      try {
+        if (user) {
+          const localProjects = readSavedProjects();
+          if (localProjects.length) {
+            const rows = localProjects.map((project) => projectToRow({
+              ...project,
+              id: project.id ?? crypto.randomUUID(),
+              attachments: normalizeAttachments(project.attachments),
+            }, user.id));
+            const { imported } = await requestProjectsApi<{ imported: number }>("/projects/import", {
+              method: "POST",
+              body: JSON.stringify({ projects: rows }),
+            });
             window.localStorage.removeItem(LEGACY_PROJECTS_STORAGE_KEY);
-            setNotice(`${localProjects.length} projeto(s) local(is) importado(s) para o Supabase.`);
+            setNotice(`${imported} projeto(s) local(is) importado(s) para o Supabase.`);
           }
         }
+        const { projects: rows } = await requestProjectsApi<{ projects: ProjectRow[] }>("/projects");
+        if (active) setRemoteProjects(rows.map((row) => projectFromRow(row)));
+      } catch (error) {
+        if (active) setNotice(`Erro ao carregar projetos pela API: ${errorMessage(error)}`);
+      } finally {
+        if (active) setLoadingProjects(false);
       }
-      const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
-      if (!active) return;
-      if (error) setNotice(`Erro ao carregar o acervo: ${error.message}`);
-      else setRemoteProjects((data ?? []).map((row) => projectFromRow(row as ProjectRow)));
-      setLoadingProjects(false);
     };
     void loadProjects();
     return () => { active = false; };
@@ -674,9 +714,56 @@ export default function App() {
 
   const releaseProjectClaim = async (projectId: string, account = user) => {
     if (!supabase || !account) return;
-    const { error } = await supabase.rpc("release_project_claim", { target_project_id: projectId });
-    if (error) setNotice(`Não foi possível liberar a reserva: ${error.message}`);
-    setClaimedProjectId((current) => current === projectId ? null : current);
+    try {
+      await requestProjectsApi(`/projects/${projectId}/claim/release`, { method: "POST" });
+      setClaimedProjectId((current) => current === projectId ? null : current);
+    } catch (error) {
+      setNotice(`Não foi possível liberar a reserva: ${errorMessage(error)}`);
+    }
+  };
+
+  const deleteProject = async (project: Project) => {
+    if (!user || !project.id || !UUID_PATTERN.test(project.id)) {
+      setNotice("Entre na sua conta para excluir um projeto publicado.");
+      return;
+    }
+    if (project.ownerId !== user.id && !isProjectAdmin(user.email)) {
+      setNotice("Você só pode excluir projetos que criou.");
+      return;
+    }
+    if (!window.confirm(`Excluir permanentemente “${project.name}”? Esta ação não pode ser desfeita.`)) return;
+    setProjectActionId(project.id);
+    try {
+      await requestProjectsApi(`/projects/${project.id}`, { method: "DELETE" });
+      setRemoteProjects((current) => current.filter((item) => item.id !== project.id));
+      if (selected.id === project.id) setScreen("archive");
+      setNotice(`Projeto “${project.name}” excluído.`);
+    } catch (error) {
+      setNotice(`Não foi possível excluir o projeto: ${errorMessage(error)}`);
+    } finally {
+      setProjectActionId(null);
+    }
+  };
+
+  const abandonContinuation = async (project: Project) => {
+    if (!user || !project.id || project.ownerId !== user.id || !project.versionOf || !["Em andamento", "Planejamento"].includes(project.status)) {
+      setNotice("Você só pode abandonar uma continuação ativa que criou.");
+      return;
+    }
+    if (!window.confirm(`Abandonar a continuação “${project.name}”? Ela ficará pausada e outra pessoa poderá continuar o projeto.`)) return;
+    setProjectActionId(project.id);
+    try {
+      await requestProjectsApi(`/projects/${project.id}/abandon`, { method: "POST" });
+      const abandoned = { ...project, status: "Pausado", mineStatus: "Abandonados" };
+      setRemoteProjects((current) => current.map((item) => item.id === project.id ? abandoned : item));
+      setSelected((current) => current.id === project.id ? abandoned : current);
+      setClaimedProjectId((current) => current === project.versionOf ? null : current);
+      setNotice(`A continuação “${project.name}” foi pausada e a reserva liberada.`);
+    } catch (error) {
+      setNotice(`Não foi possível abandonar a continuação: ${errorMessage(error)}`);
+    } finally {
+      setProjectActionId(null);
+    }
   };
 
   const beginContinuity = async (project: Project, account = user) => {
@@ -704,8 +791,7 @@ export default function App() {
     }
     setClaimingProjectId(project.id);
     try {
-      const { error } = await supabase.rpc("claim_project", { target_project_id: project.id });
-      if (error) throw error;
+      await requestProjectsApi(`/projects/${project.id}/claim`, { method: "POST" });
       setClaimedProjectId(project.id);
       setScreen("continuity");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -761,9 +847,11 @@ export default function App() {
         attachments.push({ name: file.name, path });
       }
       const savedProject = { ...project, id, ownerId: user.id, attachments };
-      const { data, error } = await supabase.from("projects").insert(projectToRow(savedProject, user.id)).select("*").single();
-      if (error) throw error;
-      const persisted = projectFromRow(data as ProjectRow);
+      const { project: row } = await requestProjectsApi<{ project: ProjectRow }>("/projects", {
+        method: "POST",
+        body: JSON.stringify({ project: projectToRow(savedProject, user.id) }),
+      });
+      const persisted = projectFromRow(row);
       setRemoteProjects((current) => [persisted, ...current.filter((item) => item.id !== persisted.id)]);
       setSelected(persisted);
       setSuccess(successType);
@@ -776,9 +864,7 @@ export default function App() {
   const saveVersion = async (project: Project) => {
     await persistProject(project, [], "version");
     if (supabase && project.versionOf && UUID_PATTERN.test(project.versionOf)) {
-      const { error } = await supabase.rpc("release_project_claim", { target_project_id: project.versionOf });
-      if (error) setNotice(`Versão salva, mas a reserva não pôde ser liberada: ${error.message}`);
-      setClaimedProjectId((current) => current === project.versionOf ? null : current);
+      await releaseProjectClaim(project.versionOf);
     }
   };
   const handleAuthenticated = (authenticatedUser: User) => {
@@ -802,14 +888,16 @@ export default function App() {
     if (error) setNotice(error.message);
     else { setScreen("home"); setNotice("Você saiu da sua conta."); }
   };
+  const canDeleteSelectedProject = Boolean(user && (selected.ownerId === user.id || isProjectAdmin(user.email)));
+  const canAbandonSelectedProject = Boolean(user && selected.ownerId === user.id && selected.versionOf && ["Em andamento", "Planejamento"].includes(selected.status));
   return <Shell screen={screen} go={go} user={user} onOpenAuth={() => setAuthOpen(true)} onSignOut={signOut} notice={notice} dismissNotice={() => setNotice("")} theme={theme} toggleTheme={toggleTheme}>
     {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
-    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} />}
+    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} />}
     {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} onCancel={() => { if (claimedProjectId) void releaseProjectClaim(claimedProjectId); setScreen("detail"); }} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
-    {screen === "mine" && <Mine projects={mineProjects} go={go} selectProject={selectProject} />}
+    {screen === "mine" && <Mine projects={mineProjects} go={go} selectProject={selectProject} onDeleteProject={(project) => { void deleteProject(project); }} onAbandonContinuation={(project) => { void abandonContinuation(project); }} actionPendingId={projectActionId} />}
     {aiOpen && <AIPanel project={selected} close={() => setAiOpen(false)} usePlan={(value) => { setPlan(value); setAiOpen(false); void beginContinuity(selected); }} />}
     {authOpen && <AuthModal close={() => setAuthOpen(false)} onAuthenticated={handleAuthenticated} />}
     {success && <SuccessModal title={success === "version" ? "Nova versão criada com sucesso!" : "Projeto cadastrado com sucesso!"} text={success === "version" ? "O projeto já está disponível em Meus Projetos." : "A ficha do projeto foi criada e já pode ser acessada."} close={() => { setSuccess(null); go("mine"); }} />}
