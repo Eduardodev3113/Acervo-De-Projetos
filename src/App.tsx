@@ -1,10 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, ReactElement, ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { ATTACHMENTS_BUCKET, supabase } from "./supabase";
 
-type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine";
+type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history";
 type ProjectAttachment = { name: string; path?: string };
+type AuditEntry = {
+  id: number;
+  table_name: string;
+  record_id: string;
+  operation: "INSERT" | "UPDATE" | "DELETE";
+  actor_email: string | null;
+  changed_at: string;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+};
 type Project = {
   id?: string;
   ownerId?: string;
@@ -33,7 +43,9 @@ const CONTINUITY_DRAFT_STORAGE_KEY = "acervo-projetos:continuity:";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IFSC_EMAIL_DOMAINS = ["ifsc.edu.br", "aluno.ifsc.edu.br"];
 const PROJECT_ADMIN_EMAILS = ["eduardo.r2008@aluno.ifsc.edu.br", "vinicius.amf20@aluno.ifsc.edu.br"];
+const PROJECT_IMAGE_ADMIN_EMAIL = "eduardo.r2008@aluno.ifsc.edu.br";
 const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4"];
+const ARCHIVE_PAGE_SIZE = 8;
 
 function isIfscEmail(email: string | null | undefined) {
   const normalizedEmail = email?.trim().toLowerCase() ?? "";
@@ -165,6 +177,10 @@ function attachmentUrl(path?: string) {
   return path && supabase ? supabase.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(path).data.publicUrl : undefined;
 }
 
+function isImageAttachment(name: string) {
+  return /\.(png|jpe?g)$/i.test(name);
+}
+
 type ProjectDraft = {
   name: string;
   class: string;
@@ -177,14 +193,13 @@ type ProjectDraft = {
   results: string;
   team: string[];
   resources: string;
-  attachments: string[];
 };
 
 function readProjectDraft(): ProjectDraft {
   const emptyDraft: ProjectDraft = {
     name: "", class: "", year: String(new Date().getFullYear()), area: "", oiCore: "",
     status: "Em andamento", description: "", objective: "", results: "",
-    team: [""], resources: "", attachments: [],
+    team: [""], resources: "",
   };
   try {
     const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -225,6 +240,7 @@ function Header({ screen, go, user, onOpenAuth, onSignOut, theme, toggleTheme }:
         <button className={screen === "archive" || screen === "detail" ? "active" : ""} onClick={() => go("archive")}>Acervo</button>
         <button className={screen === "register" ? "active" : ""} onClick={() => go("register")}>Cadastrar</button>
         <button className={screen === "mine" ? "active" : ""} onClick={() => go("mine")}>Meus Projetos</button>
+        {user?.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL && <button className={screen === "history" ? "active" : ""} onClick={() => go("history")}>Histórico</button>}
       </nav>
       <div className="header-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={theme === "light" ? "Ativar modo escuro" : "Ativar modo claro"} aria-pressed={theme === "dark"} title={theme === "light" ? "Modo escuro" : "Modo claro"}>{theme === "light" ? "☾" : "☀"}</button><button className="primary small" title={user?.email ?? "Entrar"} onClick={user ? onSignOut : onOpenAuth}>{user ? "Sair" : "Entrar"}</button></div>
     </header>
@@ -264,6 +280,12 @@ function Picture({ large = false }: { large?: boolean }) {
   return <div className={`picture ${large ? "large" : ""}`}><div className="mountain" /><div className="sun" /></div>;
 }
 
+function ProjectThumbnail({ project }: { project: Project }) {
+  const cover = project.attachments?.find((attachment) => attachment.path && isImageAttachment(attachment.name));
+  const url = attachmentUrl(cover?.path);
+  return url ? <div className="picture"><img src={url} alt={project.name} loading="lazy" /></div> : <Picture />;
+}
+
 function Tags({ items }: { items: string[] }) {
   return <div className="tags">{items.map((item) => <span key={item}>{item}</span>)}</div>;
 }
@@ -271,7 +293,7 @@ function Tags({ items }: { items: string[] }) {
 function ProjectCard({ project, onClick }: { project: Project; onClick: () => void }) {
   return (
     <article className="project-card" onClick={onClick}>
-      <Picture />
+      <ProjectThumbnail project={project} />
       <div className="card-copy">
         <div className="project-title"><b>{project.name}</b><span className="status-dot" /></div>
           <small>{[project.oiCore?.split(" - ")[0], project.area, project.class && `Turma ${project.class}`, project.year].filter(Boolean).join(" · ") || "Projeto"}</small>
@@ -326,13 +348,13 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
   const [classFilter, setClassFilter] = useState("Todas");
   const [year, setYear] = useState("Todos");
   const [oiCore, setOiCore] = useState("Todos");
-  const [tech, setTech] = useState("Todas");
   const [status, setStatus] = useState("Todos");
   const [sort, setSort] = useState("Mais recentes");
-  const [groupCollapsed, setGroupCollapsed] = useState({ class: false, year: false, oiCore: false, tech: false, status: false });
+  const [page, setPage] = useState(1);
+  const [groupCollapsed, setGroupCollapsed] = useState({ class: false, year: false, oiCore: false, status: false });
   const classOptions = ["Todas", ...new Set(projects.map((project) => project.class).filter(Boolean))];
   const yearOptions = ["Todos", ...new Set(projects.map((project) => project.year).filter(Boolean))];
-  const resourceOptions = ["Todas", ...new Set(projects.flatMap(projectResources))];
+  useEffect(() => setPage(1), [query, classFilter, year, oiCore, status, sort]);
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
     return projects.filter((p) =>
@@ -340,10 +362,14 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
       (classFilter === "Todas" || p.class === classFilter) &&
       (year === "Todos" || p.year === year) &&
       (oiCore === "Todos" || p.oiCore === oiCore) &&
-      (tech === "Todas" || projectResources(p).includes(tech)) &&
       (status === "Todos" || p.status === status)
     ).sort((a, b) => sort === "A–Z" ? a.name.localeCompare(b.name) : sort === "Mais antigos" ? a.year.localeCompare(b.year) : b.year.localeCompare(a.year));
-  }, [projects, query, classFilter, year, oiCore, tech, status, sort]);
+  }, [projects, query, classFilter, year, oiCore, status, sort]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ARCHIVE_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const firstVisiblePage = Math.max(1, Math.min(currentPage - 2, pageCount - 4));
+  const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstVisiblePage + index);
+  const visibleProjects = filtered.slice((currentPage - 1) * ARCHIVE_PAGE_SIZE, currentPage * ARCHIVE_PAGE_SIZE);
   const toggleGroup = (key: keyof typeof groupCollapsed) => setGroupCollapsed((current) => ({ ...current, [key]: !current[key] }));
   const open = (p: Project) => { selectProject(p); go("detail"); };
   return (
@@ -356,40 +382,56 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
             <FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={setClassFilter} collapsed={groupCollapsed.class} onToggle={() => toggleGroup("class")} />
             <FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={setYear} collapsed={groupCollapsed.year} onToggle={() => toggleGroup("year")} />
             <FilterGroup title="Núcleo OI" options={["Todos", ...OI_CORE_OPTIONS]} selected={oiCore} onSelect={setOiCore} collapsed={groupCollapsed.oiCore} onToggle={() => toggleGroup("oiCore")} />
-            <FilterGroup title="Recursos" options={resourceOptions} selected={tech} onSelect={setTech} collapsed={groupCollapsed.tech} onToggle={() => toggleGroup("tech")} />
             <FilterGroup title="Status" options={["Todos", ...new Set(projects.map((project) => project.status))]} selected={status} onSelect={setStatus} collapsed={groupCollapsed.status} onToggle={() => toggleGroup("status")} />
           </div>
         </aside>
         <section className="results">
           <div className="result-head"><b>{filtered.length} resultados encontrados</b><label>Ordenar por: <select value={sort} onChange={(e) => setSort(e.target.value)}><option>Mais recentes</option><option>Mais antigos</option><option>A–Z</option></select></label></div>
-          {filtered.length ? <div className="cards-grid">{filtered.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter("Todas"); setYear("Todos"); setOiCore("Todos"); setTech("Todas"); setStatus("Todos"); }}>Limpar filtros</button></div>}
-          <div className="pagination"><button>‹</button><button className="selected">1</button><button>2</button><button>3</button><button>4</button><button>›</button></div>
+          {filtered.length ? <div className="cards-grid">{visibleProjects.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter("Todas"); setYear("Todos"); setOiCore("Todos"); setStatus("Todos"); }}>Limpar filtros</button></div>}
+          {pageCount > 1 && <div className="pagination" aria-label="Paginação do acervo"><button type="button" aria-label="Página anterior" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>‹</button>{pageNumbers.map((pageNumber) => <button type="button" key={pageNumber} className={currentPage === pageNumber ? "selected" : ""} aria-label={`Página ${pageNumber}`} aria-current={currentPage === pageNumber ? "page" : undefined} onClick={() => setPage(pageNumber)}>{pageNumber}</button>)}<span className="pagination-status">{currentPage} / {pageCount}</span><button type="button" aria-label="Próxima página" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>›</button></div>}
         </section>
       </div>
     </div>
   );
 }
 
-function ProjectHero({ project, openAI, assume, claiming, canDelete, canAbandon, actionBusy, onDelete, onAbandon }: { project: Project; openAI: () => void; assume: () => void; claiming: boolean; canDelete: boolean; canAbandon: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void }) {
+function ProjectHero({ project, openAI, assume, claiming, canDelete, canAbandon, canAddImages, actionBusy, onDelete, onAbandon, onAddImages }: { project: Project; openAI: () => void; assume: () => void; claiming: boolean; canDelete: boolean; canAbandon: boolean; canAddImages: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void; onAddImages: (files: File[]) => Promise<void> }) {
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
   const claimable = Boolean(project.id && UUID_PATTERN.test(project.id) && project.status !== "Em andamento");
   const claimTitle = !project.id || !UUID_PATTERN.test(project.id)
     ? "Somente projetos publicados no acervo podem ser assumidos."
     : project.status === "Em andamento"
       ? "Este projeto já está em andamento."
       : "Assumir projeto";
-  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões IA</button>{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}</div></div>;
+  const uploadImages = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (!files.length) return;
+    setUploadingImages(true);
+    setImageUploadError("");
+    try {
+      await onAddImages(files);
+    } catch (error) {
+      setImageUploadError(errorMessage(error));
+    } finally {
+      setUploadingImages(false);
+    }
+  };
+  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões IA</button>{canAddImages && <><button className="secondary" disabled={actionBusy || uploadingImages} onClick={() => imageInputRef.current?.click()}>{uploadingImages ? "Enviando imagens..." : "Adicionar imagens"}</button><input ref={imageInputRef} className="image-file-input" type="file" accept="image/png,image/jpeg" multiple onChange={uploadImages} /></>}{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}{imageUploadError && <p className="form-error image-upload-error" role="alert">{imageUploadError}</p>}</div></div>;
 }
 
-function Detail({ project, projects, openAI, onAssume, claiming, selectProject, canDelete, canAbandon, actionBusy, onDelete, onAbandon }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void }) {
+function Detail({ project, projects, openAI, onAssume, claiming, selectProject, canDelete, canAbandon, canAddImages, actionBusy, onDelete, onAbandon, onAddImages }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; canAddImages: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void; onAddImages: (files: File[]) => Promise<void> }) {
   const [tab, setTab] = useState("Ficha");
   return <div className="page detail">
     <div className="breadcrumb">Acervo <span>›</span> {project.name}</div>
-    <ProjectHero project={project} openAI={openAI} assume={onAssume} claiming={claiming} canDelete={canDelete} canAbandon={canAbandon} actionBusy={actionBusy} onDelete={onDelete} onAbandon={onAbandon} />
+    <ProjectHero project={project} openAI={openAI} assume={onAssume} claiming={claiming} canDelete={canDelete} canAbandon={canAbandon} canAddImages={canAddImages} actionBusy={actionBusy} onDelete={onDelete} onAbandon={onAbandon} onAddImages={onAddImages} />
     <div className="tabs">{["Ficha", "Materiais e métodos", "Histórico de versões"].map((t) => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}</button>)}</div>
     <div className="detail-layout">
       <section>
         {tab === "Ficha" && <><div className="panel"><h3>Sobre o projeto</h3><div className="summary-grid"><Info icon="users" title="Participantes" text={project.team?.length ? `${project.team.length} participante(s)` : "Não informado"} /><Info icon="target" title="Objetivo" text={project.objective || project.description} /><Info icon="chart" title="Resultados" text={project.results || "Ainda não informados."} /></div></div><Team members={project.team ?? []} /></>}
-        {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos</h4>{project.attachments.map((attachment) => { const href = attachmentUrl(attachment.path); return <p key={attachment.path ?? attachment.name}>{href ? <a href={href} target="_blank" rel="noreferrer">{attachment.name}</a> : attachment.name}</p>; })}</> : null}</div>}
+        {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos</h4><div className="project-image-grid">{project.attachments.filter((attachment) => attachment.path && isImageAttachment(attachment.name)).map((attachment) => { const href = attachmentUrl(attachment.path); return href ? <a className="project-image-attachment" key={attachment.path} href={href} target="_blank" rel="noreferrer"><img src={href} alt={attachment.name} /><span>{attachment.name}</span></a> : null; })}</div>{project.attachments.filter((attachment) => !attachment.path || !isImageAttachment(attachment.name)).map((attachment) => { const href = attachmentUrl(attachment.path); return <p key={attachment.path ?? attachment.name}>{href ? <a href={href} target="_blank" rel="noreferrer">{attachment.name}</a> : attachment.name}</p>; })}</> : null}</div>}
         {tab === "Histórico de versões" && <div className="panel tab-content"><h3>Histórico de versões</h3>{project.versionOf ? <div className="history"><i /><div><b>Nova versão criada</b><p>{projects.find((item) => item.id === project.versionOf)?.name ?? "Projeto original"}</p></div></div> : <p>Nenhuma versão anterior registrada.</p>}</div>}
       </section>
       <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Núcleo OI</small><b>{project.oiCore || "Não informado"}</b><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
@@ -524,7 +566,7 @@ function Register({ onSuccess }: { onSuccess: (project: Project, files: File[]) 
     {step === 1 && <GenericStep title="Participantes" text="Adicione pessoas responsáveis ou colaboradoras. Este campo é opcional.">{form.team.map((member, index) => <div className="member-input" key={index}><input value={member} onChange={(e) => update("team", form.team.map((item, i) => i === index ? e.target.value : item))} placeholder="Nome do participante" />{index > 0 && <button onClick={() => update("team", form.team.filter((_, i) => i !== index))}>×</button>}</div>)}<button className="secondary" onClick={() => update("team", [...form.team, ""])}>+ Adicionar participante</button></GenericStep>}
     {step === 2 && <GenericStep title="Objetivos e resultados" text="Registre o propósito e os resultados alcançados."><Field label="Objetivos"><textarea value={form.objective} onChange={(e) => update("objective", e.target.value)} placeholder="O que o projeto busca transformar, investigar ou realizar?" /></Field><Field label="Resultados e aprendizados"><textarea value={form.results} onChange={(e) => update("results", e.target.value)} placeholder="Descreva resultados, impactos e aprendizados..." /></Field></GenericStep>}
     {step === 3 && <GenericStep title="Recursos e métodos" text="Registre o que foi usado ou desenvolvido, seja material, técnica ou ferramenta."><Field label="Materiais, ferramentas, métodos e referências"><textarea value={form.resources} onChange={(e) => update("resources", e.target.value)} placeholder="Ex.: entrevistas, sementes, câmera, laboratório, oficina de escrita, Python... Separe os itens por vírgula ou linha." /></Field></GenericStep>}
-    {step === 4 && <GenericStep title="Anexos" text="Registre documentos, imagens, apresentações ou outros arquivos relacionados."><label className="dropzone"><Icon name="upload" size={28} /><b>Selecionar arquivos</b><small>Os nomes ficam registrados neste navegador.</small><input type="file" multiple onChange={(e) => update("attachments", Array.from(e.currentTarget.files ?? []).map((file) => file.name))} /></label>{form.attachments.length > 0 && <p className="muted">{form.attachments.join(", ")}</p>}</GenericStep>}
+    {step === 4 && <GenericStep title="Anexos" text="Adicione imagens JPG ou PNG e documentos PDF ou ZIP (até 10 MB cada)."><label className="dropzone"><Icon name="upload" size={28} /><b>Selecionar arquivos</b><small>Os arquivos serão enviados junto com o projeto.</small><input type="file" accept="image/png,image/jpeg,application/pdf,application/zip" multiple onChange={(e) => { const files = Array.from(e.currentTarget.files ?? []); setSelectedFiles((current) => { const knownFiles = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); return [...current, ...files.filter((file) => !knownFiles.has(`${file.name}:${file.size}:${file.lastModified}`))]; }); e.currentTarget.value = ""; }} /></label>{selectedFiles.length > 0 && <ul className="selected-attachments">{selectedFiles.map((file) => <li key={`${file.name}:${file.size}:${file.lastModified}`}><span>{file.name}</span><button type="button" aria-label={`Remover ${file.name}`} onClick={() => setSelectedFiles((current) => current.filter((item) => item !== file))}>×</button></li>)}</ul>}</GenericStep>}
     <div className="wizard-actions"><button className="secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>Voltar</button>{step < 4 ? <button className="primary" disabled={!valid} onClick={() => setStep(step + 1)}>Próximo <Icon name="arrow" size={16} /></button> : <button className="primary" onClick={saveProject}>Cadastrar projeto</button>}</div>
   </section><aside className="panel preview"><h3>Pré-visualização da ficha</h3><Picture /><small>{form.area || "Área ou tema"}</small><h2>{form.name || "Seu projeto"}</h2><span className="pill">{form.status}</span><h4>Resumo</h4><p>{form.description || "A descrição do projeto aparecerá aqui..."}</p><h4>Participantes</h4><Info icon="users" title="" text={`${form.team.filter(Boolean).length} informado(s)`} /></aside></div></div>;
 }
@@ -620,6 +662,53 @@ function AuthModal({ close, onAuthenticated }: { close: () => void; onAuthentica
 
 function SuccessModal({ title, text, close }: { title: string; text: string; close: () => void }) {
   return <><div className="overlay top" /><div className="success-modal"><div className="success-check"><Icon name="check" size={28} /></div><h2>{title}</h2><p>{text}</p><button className="primary" onClick={close}>Concluir</button></div></>;
+}
+
+function auditRecordName(entry: AuditEntry) {
+  const name = entry.new_data?.name ?? entry.old_data?.name;
+  return typeof name === "string" ? name : entry.record_id;
+}
+
+function auditChangedFields(entry: AuditEntry) {
+  if (entry.operation === "INSERT") return "Registro criado";
+  if (entry.operation === "DELETE") return "Registro removido";
+  const before = entry.old_data ?? {};
+  const after = entry.new_data ?? {};
+  const labels: Record<string, string> = {
+    name: "nome", project_class: "turma", year: "ano", oi_core: "núcleo OI", area: "área",
+    status: "status", description: "descrição", objective: "objetivo", results: "resultados",
+    resources: "recursos", team: "equipe", attachments: "anexos", mine_status: "situação pessoal",
+    version_of: "versão", plan: "plano", due_date: "prazo", expires_at: "expiração", claimant_id: "responsável",
+  };
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .map((key) => labels[key] ?? key);
+  return changed.length ? `Alterados: ${changed.join(", ")}` : "Sem diferenças de campos";
+}
+
+function AuditHistory() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    void requestProjectsApi<{ events: AuditEntry[] }>("/audit-log")
+      .then(({ events }) => { if (active) setEntries(events); })
+      .catch((reason: unknown) => { if (active) setError(errorMessage(reason)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refreshKey]);
+
+  return <div className="page audit-page">
+    <div className="page-heading"><div><h1>Histórico de alterações</h1><p>Alterações registradas no acervo</p></div><button className="secondary" onClick={() => setRefreshKey((current) => current + 1)}>Atualizar</button></div>
+    {loading && <p className="muted" role="status">Carregando histórico...</p>}
+    {error && <p className="form-error" role="alert">Não foi possível carregar o histórico: {error}</p>}
+    {!loading && !error && !entries.length && <div className="empty"><h3>Nenhuma alteração registrada</h3><p>Novas alterações aparecerão aqui.</p></div>}
+    {!loading && !error && entries.length > 0 && <div className="panel audit-panel"><div className="audit-table-scroll"><table className="audit-table"><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Registro</th><th>Campos / valores</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id}><td>{new Date(entry.changed_at).toLocaleString("pt-BR")}</td><td>{entry.actor_email ?? "Sessão não identificada"}</td><td>{entry.operation} · {entry.table_name}</td><td>{auditRecordName(entry)}</td><td><span>{auditChangedFields(entry)}</span><details><summary>Ver valores</summary><div className="audit-values"><b>Antes</b><pre>{JSON.stringify(entry.old_data, null, 2) ?? "—"}</pre><b>Depois</b><pre>{JSON.stringify(entry.new_data, null, 2) ?? "—"}</pre></div></details></td></tr>)}</tbody></table></div></div>}
+  </div>;
 }
 
 export default function App() {
@@ -810,6 +899,10 @@ export default function App() {
       void beginContinuity(selected);
       return;
     }
+    if (nextScreen === "history" && user?.email?.trim().toLowerCase() !== PROJECT_IMAGE_ADMIN_EMAIL) {
+      setNotice("O histórico está disponível somente para a conta administradora.");
+      return;
+    }
     if (nextScreen === "register" || nextScreen === "mine") {
       if (!supabase) {
         setNotice("Configure a URL e a chave publishable do Supabase no arquivo .env.local primeiro.");
@@ -861,6 +954,34 @@ export default function App() {
     }
   };
   const saveProject = (project: Project, files: File[]) => persistProject(project, files, "project");
+  const addProjectImages = async (project: Project, files: File[]) => {
+    if (!supabase || !user || !project.id || !UUID_PATTERN.test(project.id)) throw new Error("Entre com sua conta para adicionar imagens a um projeto publicado.");
+    if (files.some((file) => !["image/png", "image/jpeg"].includes(file.type))) throw new Error("Selecione somente imagens PNG ou JPG.");
+    const uploadedPaths: string[] = [];
+    try {
+      const images: ProjectAttachment[] = [];
+      for (const file of files) {
+        if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} excede o limite de 10 MB.`);
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `${user.id}/${project.id}/${crypto.randomUUID()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage.from(ATTACHMENTS_BUCKET).upload(path, file, { contentType: file.type });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+        images.push({ name: file.name, path });
+      }
+      const { attachments } = await requestProjectsApi<{ attachments: ProjectAttachment[] }>(`/projects/${project.id}/images`, {
+        method: "POST",
+        body: JSON.stringify({ images }),
+      });
+      const updatedProject = { ...project, attachments };
+      setRemoteProjects((current) => current.map((item) => item.id === project.id ? updatedProject : item));
+      setSelected((current) => current.id === project.id ? updatedProject : current);
+      setNotice(`${images.length} imagem(ns) adicionada(s) ao projeto.`);
+    } catch (error) {
+      if (uploadedPaths.length) await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+      throw error;
+    }
+  };
   const saveVersion = async (project: Project) => {
     await persistProject(project, [], "version");
     if (supabase && project.versionOf && UUID_PATTERN.test(project.versionOf)) {
@@ -890,14 +1011,19 @@ export default function App() {
   };
   const canDeleteSelectedProject = Boolean(user && (selected.ownerId === user.id || isProjectAdmin(user.email)));
   const canAbandonSelectedProject = Boolean(user && selected.ownerId === user.id && selected.versionOf && ["Em andamento", "Planejamento"].includes(selected.status));
+  const canAddImagesToSelectedProject = Boolean(user && selected.id && selected.status.trim().toLowerCase() === "concluído" && (
+    user.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL
+    || projects.some((project) => project.versionOf === selected.id && project.ownerId === user.id && ["Em andamento", "Planejamento"].includes(project.status))
+  ));
   return <Shell screen={screen} go={go} user={user} onOpenAuth={() => setAuthOpen(true)} onSignOut={signOut} notice={notice} dismissNotice={() => setNotice("")} theme={theme} toggleTheme={toggleTheme}>
     {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
-    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} />}
+    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} canAddImages={canAddImagesToSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} onAddImages={(files) => addProjectImages(selected, files)} />}
     {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} onCancel={() => { if (claimedProjectId) void releaseProjectClaim(claimedProjectId); setScreen("detail"); }} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
     {screen === "mine" && <Mine projects={mineProjects} go={go} selectProject={selectProject} onDeleteProject={(project) => { void deleteProject(project); }} onAbandonContinuation={(project) => { void abandonContinuation(project); }} actionPendingId={projectActionId} />}
+    {screen === "history" && user?.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL && <AuditHistory />}
     {aiOpen && <AIPanel project={selected} close={() => setAiOpen(false)} usePlan={(value) => { setPlan(value); setAiOpen(false); void beginContinuity(selected); }} />}
     {authOpen && <AuthModal close={() => setAuthOpen(false)} onAuthenticated={handleAuthenticated} />}
     {success && <SuccessModal title={success === "version" ? "Nova versão criada com sucesso!" : "Projeto cadastrado com sucesso!"} text={success === "version" ? "O projeto já está disponível em Meus Projetos." : "A ficha do projeto foi criada e já pode ser acessada."} close={() => { setSuccess(null); go("mine"); }} />}

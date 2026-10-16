@@ -4,7 +4,7 @@
 
 1. Instale o Node.js 22.12 ou superior e execute `npm install`.
 2. Crie ou complete `.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`; não substitua valores existentes.
-3. No SQL Editor do Supabase, execute `supabase-schema.sql` para criar tabelas, políticas e funções de reserva.
+3. No SQL Editor do Supabase, execute `supabase-schema.sql` para criar tabelas, políticas, funções e gatilhos de auditoria. Em instalações existentes, execute o arquivo novamente para aplicar atualizações, incluindo a auditoria (que registra eventos somente a partir da instalação) e a autorização para anexar imagens a projetos concluídos.
 4. Configure `AI_API_URL`, `AI_API_KEY` e `AI_MODEL` em `.env.local` usando um provedor compatível com a API de Chat Completions. A chave fica somente no servidor.
 5. Execute `npm run dev` e abra `http://localhost:8443/`. O comando inicia a interface e a API própria em conjunto.
 

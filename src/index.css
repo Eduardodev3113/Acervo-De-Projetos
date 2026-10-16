@@ -80,6 +80,7 @@ p { line-height: 1.55; }
 .project-card { background: white; border: 1px solid #d4e0e9; border-radius: 7px; padding: 10px; overflow: hidden; position: relative; transition: .2s; cursor: pointer; display: flex; flex-direction: column; }
 .project-card:hover { transform: translateY(-3px); border-color: #9eb4c5; box-shadow: 0 10px 24px rgba(23,57,83,.1); }
 .project-card .picture { height: 120px; width: 100%; }
+.project-card .picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .card-copy { padding: 12px 5px 8px; flex: 1; }
 .project-title { display: flex; align-items: center; justify-content: space-between; font-size: 16px; }
 .project-card small { color: #526b7e; }
@@ -110,6 +111,18 @@ p { line-height: 1.55; }
 .pagination { display: flex; justify-content: center; gap: 8px; padding-top: 22px; }
 .pagination button { width: 33px; height: 33px; border: 1px solid #c8d6e0; background: white; border-radius: 4px; }
 .pagination button.selected { background: #12314a; color: white; }
+.pagination-status { min-width: 42px; align-self: center; color: #60778a; text-align: center; font-size: 12px; }
+.audit-panel { overflow: hidden; }
+.audit-table-scroll { overflow-x: auto; }
+.audit-table { width: 100%; min-width: 820px; border-collapse: collapse; text-align: left; font-size: 12px; }
+.audit-table th, .audit-table td { padding: 10px 12px; border-bottom: 1px solid #d6e1e9; vertical-align: top; }
+.audit-table th { background: #f6f9fb; white-space: nowrap; }
+.audit-table td:first-child { min-width: 150px; }
+.audit-table td:last-child { min-width: 280px; }
+.audit-table details { margin-top: 7px; }
+.audit-table summary { cursor: pointer; color: #315e7e; }
+.audit-values { display: grid; grid-template-columns: 1fr; gap: 4px; margin-top: 8px; }
+.audit-values pre { max-height: 260px; overflow: auto; margin: 0 0 8px; padding: 10px; border-radius: 4px; background: #f5f8fa; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .empty { min-height: 430px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #bdcdd9; border-radius: 8px; background: rgba(255,255,255,.55); }
 .empty h3 { margin: 14px 0 2px; }
 .empty p { color: #60778a; }
@@ -118,6 +131,8 @@ p { line-height: 1.55; }
 .project-hero { display: grid; grid-template-columns: 150px 1fr auto; align-items: center; gap: 22px; padding: 22px; background: white; border: 1px solid #d7e2ea; border-radius: 7px; }
 .project-hero .picture { width: 150px; height: 110px; }
 .project-hero-copy { display: flex; align-items: flex-start; gap: 14px; }
+.image-file-input { display: none; }
+.image-upload-error { grid-column: 1 / -1; margin: 0; }
 .project-hero-copy h2 { margin: 0 0 5px; font-size: 25px; }
 .hero-actions { display: flex; flex-direction: column; gap: 10px; min-width: 190px; }
 .tabs { display: flex; height: 54px; gap: 42px; align-items: end; border-bottom: 1px solid #d1dde6; padding-left: 10px; }
@@ -190,6 +205,14 @@ p { line-height: 1.55; }
 .dropzone:hover { border-color: #315e7e; background: #f1f6fa; }
 .dropzone input { display: none; }
 .dropzone small { color: #718696; }
+.selected-attachments { list-style: none; display: grid; gap: 6px; margin: 14px 0 0; padding: 0; }
+.selected-attachments li { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #cdd9e2; border-radius: 4px; padding: 7px 9px; font-size: 12px; }
+.selected-attachments li span { overflow-wrap: anywhere; }
+.selected-attachments button { flex: 0 0 30px; width: 30px; height: 30px; border: 1px solid #c7d5df; border-radius: 4px; background: white; font-size: 18px; }
+.project-image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; margin: 12px 0 18px; }
+.project-image-attachment { min-width: 0; overflow: hidden; border: 1px solid #d5dfe6; border-radius: 4px; color: inherit; text-decoration: none; }
+.project-image-attachment img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #e8eef2; }
+.project-image-attachment span { display: block; padding: 8px; font-size: 11px; overflow-wrap: anywhere; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 .page-heading h1 { font-size: 32px; letter-spacing: -1px; margin-bottom: 8px; }
@@ -316,9 +339,21 @@ p { line-height: 1.55; }
 :root[data-theme="dark"] .theme-toggle { color: #e0e9ee; border-color: #4a606d; }
 :root[data-theme="dark"] .empty { background: rgba(26,41,50,.7); border-color: #405663; }
 :root[data-theme="dark"] .status-tabs, :root[data-theme="dark"] .tabs, :root[data-theme="dark"] .filters { border-color: #344954; }
+:root[data-theme="dark"] .filter-group { background: #1a2932; border-color: #344954; color: #dce6ec; }
+:root[data-theme="dark"] .filter-mini-toggle { color: #9bcce5; }
+:root[data-theme="dark"] .filter-options label { color: #dce6ec; }
+:root[data-theme="dark"] .filter-options input { background: #14222a; border-color: #718794; }
+:root[data-theme="dark"] .filter-options input:checked { background: #91b8ce; box-shadow: inset 0 0 0 3px #1a2932; }
+:root[data-theme="dark"] .pagination-status { color: #a9bbc6; }
+:root[data-theme="dark"] .audit-table th, :root[data-theme="dark"] .audit-table td { border-color: #344954; }
+:root[data-theme="dark"] .audit-table th { background: #243641; color: #e0e9ee; }
+:root[data-theme="dark"] .audit-table summary { color: #9bcce5; }
+:root[data-theme="dark"] .audit-values pre { background: #14222a; color: #dce6ec; }
 :root[data-theme="dark"] .info { border-color: #344954; }
 :root[data-theme="dark"] .dropzone { background: #14222a; border-color: #506774; }
 :root[data-theme="dark"] .dropzone:hover { background: #1e303a; }
+:root[data-theme="dark"] .selected-attachments li, :root[data-theme="dark"] .project-image-attachment { border-color: #405663; }
+:root[data-theme="dark"] .selected-attachments button { background: #243641; border-color: #4a606d; color: #e0e9ee; }
 :root[data-theme="dark"] .info-dialog, :root[data-theme="dark"] .auth-modal, :root[data-theme="dark"] .success-modal { background: #1a2932; border-color: #3a505c; color: #dce6ec; }
 :root[data-theme="dark"] .info-dialog p, :root[data-theme="dark"] .success-modal p { color: #b8c8d1; }
 :root[data-theme="dark"] .creator a, :root[data-theme="dark"] .contact-list a, :root[data-theme="dark"] .social-links a { color: #9bcce5; }

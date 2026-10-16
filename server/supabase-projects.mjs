@@ -116,6 +116,19 @@ async function handleProjectList(response) {
   sendJson(response, 200, { projects: data ?? [] });
 }
 
+async function handleAuditList(request, response) {
+  const { client, user } = await requireIfscUser(request);
+  if (user.email?.trim().toLowerCase() !== "eduardo.r2008@aluno.ifsc.edu.br") {
+    throw requestError("O histórico está disponível somente para a conta administradora.", 403);
+  }
+  const { data, error } = await client.from("project_audit_log")
+    .select("id,table_name,record_id,operation,actor_id,actor_email,changed_at,old_data,new_data")
+    .order("changed_at", { ascending: false })
+    .limit(500);
+  if (error) throw requestError(`Não foi possível carregar o histórico: ${error.message}`, 502);
+  sendJson(response, 200, { events: data ?? [] });
+}
+
 async function handleProjectImport(request, response) {
   const { client, user } = await requireIfscUser(request);
   const body = await readJson(request);
@@ -146,6 +159,57 @@ async function handleProjectCreate(request, response) {
   const { data, error } = await client.from("projects").insert(row).select("*").single();
   if (error) throw requestError(`Não foi possível salvar o projeto: ${error.message}`, 409);
   sendJson(response, 201, { project: data });
+}
+
+async function handleProjectImages(request, response, projectId) {
+  if (!uuidPattern.test(projectId)) throw requestError("ID de projeto inválido.");
+  const { client, user } = await requireIfscUser(request);
+  const body = await readJson(request);
+  if (!Array.isArray(body.images) || body.images.length < 1 || body.images.length > 10) {
+    throw requestError("Envie de 1 a 10 imagens por vez.");
+  }
+
+  const images = body.images.map((item) => {
+    if (!item || typeof item !== "object") throw requestError("Imagem inválida.");
+    const name = text(item.name, 255);
+    const path = text(item.path, 700);
+    if (!/\.(png|jpe?g)$/i.test(name)) throw requestError("Somente imagens PNG ou JPG podem ser adicionadas.");
+    if (!path.startsWith(`${user.id}/${projectId}/`)) throw requestError("O caminho da imagem não pertence a este projeto.", 403);
+    return { name, path };
+  });
+
+  const { data, error } = await client.rpc("append_project_images", {
+    target_project_id: projectId,
+    new_images: images,
+  });
+  if (error) throw requestError(error.message, 409);
+  sendJson(response, 200, { attachments: data ?? [] });
+}
+
+async function handleProjectNormalizeOi3(request, response, projectId) {
+  if (!uuidPattern.test(projectId)) throw requestError("ID de projeto inválido.");
+  const { client, user } = await requireIfscUser(request);
+  const { data: project, error: lookupError } = await client.from("projects")
+    .select("id,name,owner_id,year,oi_core,description")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (lookupError) throw requestError(`Não foi possível localizar o projeto: ${lookupError.message}`, 502);
+  if (!project) throw requestError("Projeto não encontrado.", 404);
+  if (project.owner_id !== user.id) throw requestError("Você só pode reclassificar projetos que criou.", 403);
+  if (project.year !== "2017" || !["OI V", "OI VI", "OI 3 - Sustentabilidade"].includes(project.oi_core)) {
+    throw requestError("Somente projetos de 2017 classificados como OI V, OI VI ou OI 3 podem ser normalizados.", 409);
+  }
+  const description = project.description.replace(/Oficina de Integração VI? \(2017\.1\)/g, "OI 3 (2017.1)");
+  const name = project.name === "Horta Urbana do IFSC" ? "Horta Urbana Comunitária" : project.name;
+
+  const { data, error } = await client.from("projects")
+    .update({ oi_core: "OI 3 - Sustentabilidade", description, name })
+    .eq("id", projectId)
+    .eq("owner_id", user.id)
+    .select("id,name,oi_core")
+    .single();
+  if (error) throw requestError(`Não foi possível reclassificar o projeto: ${error.message}`, 409);
+  sendJson(response, 200, { project: data });
 }
 
 async function handleProjectDelete(request, response, projectId) {
@@ -203,9 +267,16 @@ async function handleProjectClaim(request, response, projectId, action) {
 export async function handleProjectsApi(request, response) {
   const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
   const claimMatch = pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/claim(?:\/(renew|release))?$/i);
+  const projectImagesMatch = pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/images$/i);
+  const projectNormalizeOi3Match = pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/normalize-oi3$/i);
   const projectActionMatch = pathname.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(abandon))?$/i);
 
   try {
+    if (pathname === "/api/audit-log") {
+      if (request.method !== "GET") sendJson(response, 405, { error: "Método não permitido." });
+      else await handleAuditList(request, response);
+      return true;
+    }
     if (pathname === "/api/projects") {
       if (request.method === "GET") await handleProjectList(response);
       else if (request.method === "POST") await handleProjectCreate(request, response);
@@ -215,6 +286,16 @@ export async function handleProjectsApi(request, response) {
     if (pathname === "/api/projects/import") {
       if (request.method !== "POST") sendJson(response, 405, { error: "Método não permitido." });
       else await handleProjectImport(request, response);
+      return true;
+    }
+    if (projectImagesMatch) {
+      if (request.method !== "POST") sendJson(response, 405, { error: "Método não permitido." });
+      else await handleProjectImages(request, response, projectImagesMatch[1]);
+      return true;
+    }
+    if (projectNormalizeOi3Match) {
+      if (request.method !== "PATCH") sendJson(response, 405, { error: "Método não permitido." });
+      else await handleProjectNormalizeOi3(request, response, projectNormalizeOi3Match[1]);
       return true;
     }
     if (projectActionMatch && projectActionMatch[2] === "abandon") {
