@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactElement, ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { ATTACHMENTS_BUCKET, supabase } from "./supabase";
+import ImageOptimizer from "./ImageOptimizer";
 
-type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history";
+type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history" | "optimizer";
 type ProjectAttachment = { name: string; path?: string };
 type AuditEntry = {
   id: number;
@@ -44,7 +45,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const IFSC_EMAIL_DOMAINS = ["ifsc.edu.br", "aluno.ifsc.edu.br"];
 const PROJECT_ADMIN_EMAILS = ["eduardo.r2008@aluno.ifsc.edu.br", "vinicius.amf20@aluno.ifsc.edu.br"];
 const PROJECT_IMAGE_ADMIN_EMAIL = "eduardo.r2008@aluno.ifsc.edu.br";
-const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4"];
+const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4", "OI 7"];
 const ARCHIVE_PAGE_SIZE = 8;
 
 function isIfscEmail(email: string | null | undefined) {
@@ -238,6 +239,7 @@ function Header({ screen, go, user, onOpenAuth, onSignOut, theme, toggleTheme }:
       <button className="brand" onClick={() => go("home")}><Logo /><b>Acervo de Projetos</b></button>
       <nav>
         <button className={screen === "archive" || screen === "detail" ? "active" : ""} onClick={() => go("archive")}>Acervo</button>
+        <button className={screen === "optimizer" ? "active" : ""} onClick={() => go("optimizer")}>Otimizar fotos</button>
         <button className={screen === "register" ? "active" : ""} onClick={() => go("register")}>Cadastrar</button>
         <button className={screen === "mine" ? "active" : ""} onClick={() => go("mine")}>Meus Projetos</button>
         {user?.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL && <button className={screen === "history" ? "active" : ""} onClick={() => go("history")}>Histórico</button>}
@@ -1019,6 +1021,7 @@ export default function App() {
     {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
+    {screen === "optimizer" && <ImageOptimizer />}
     {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} canAddImages={canAddImagesToSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} onAddImages={(files) => addProjectImages(selected, files)} />}
     {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} onCancel={() => { if (claimedProjectId) void releaseProjectClaim(claimedProjectId); setScreen("detail"); }} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
