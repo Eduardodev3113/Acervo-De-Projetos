@@ -45,8 +45,40 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const IFSC_EMAIL_DOMAINS = ["ifsc.edu.br", "aluno.ifsc.edu.br"];
 const PROJECT_ADMIN_EMAILS = ["eduardo.r2008@aluno.ifsc.edu.br", "vinicius.amf20@aluno.ifsc.edu.br"];
 const PROJECT_IMAGE_ADMIN_EMAIL = "eduardo.r2008@aluno.ifsc.edu.br";
-const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4", "OI 7"];
+const OI_CORE_OPTIONS = ["OI 1", "OI 2", "OI 3 - Sustentabilidade", "OI 4"];
 const ARCHIVE_PAGE_SIZE = 8;
+
+function oiCoreLabel(value: string) {
+  const labels: Record<string, string> = {
+    "OI 1": "OI 1 · Ciência, Cultura e Sociedade",
+    "OI 2": "OI 2 · Trabalho, Tecnologia e Poder",
+    "OI 3 - Sustentabilidade": "OI 3 · Sustentabilidade e Meio Ambiente",
+    "OI 4": "OI 4 · Desenvolvimento de Sistemas, Inclusão e Cidadania",
+  };
+  return labels[value] ?? value;
+}
+
+function oiCoreKey(value: string) {
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const match = normalized.match(/\bOI\s*[-.]?\s*(IV|III|II|I|[1-4])\b/);
+  if (!match) return normalized.trim();
+  const code = ({ I: 1, II: 2, III: 3, IV: 4 } as Record<string, number>)[match[1]] ?? Number(match[1]);
+  return `OI ${code}`;
+}
+
+function compareAcademicPeriod(left: string, right: string) {
+  const leftParts = left.match(/\d+/g)?.map(Number) ?? [];
+  const rightParts = right.match(/\d+/g)?.map(Number) ?? [];
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference) return difference;
+  }
+  return left.localeCompare(right, "pt-BR", { numeric: true, sensitivity: "base" });
+}
+
+function projectAcademicPeriod(project: Project) {
+  return /\d{4}/.test(project.class) ? project.class : project.year;
+}
 
 function isIfscEmail(email: string | null | undefined) {
   const normalizedEmail = email?.trim().toLowerCase() ?? "";
@@ -342,7 +374,7 @@ function FilterGroup({ title, options, selected, onSelect, collapsed, onToggle }
       <b>{title}</b>
       <button type="button" className="filter-mini-toggle" onClick={onToggle} aria-label={collapsed ? `Expandir ${title}` : `Recolher ${title}`}>{collapsed ? "▸" : "▾"}</button>
     </div>
-    {!collapsed && <div className="filter-options">{options.map((o) => <label key={o}><input type="radio" checked={selected === o} onChange={() => onSelect(o)} /> <span>{o}</span></label>)}</div>}
+    {!collapsed && <div className="filter-options">{options.map((o) => <label key={o}><input type="radio" checked={selected === o} onChange={() => onSelect(o)} /> <span>{oiCoreLabel(o)}</span></label>)}</div>}
   </div>;
 }
 
@@ -353,9 +385,13 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
   const [status, setStatus] = useState("Todos");
   const [sort, setSort] = useState("Mais recentes");
   const [page, setPage] = useState(1);
-  const [groupCollapsed, setGroupCollapsed] = useState({ class: false, year: false, oiCore: false, status: false });
-  const classOptions = ["Todas", ...new Set(projects.map((project) => project.class).filter(Boolean))];
-  const yearOptions = ["Todos", ...new Set(projects.map((project) => project.year).filter(Boolean))];
+  const [groupCollapsed, setGroupCollapsed] = useState({ class: true, year: true, oiCore: false, status: true });
+  const classOptions = ["Todas", ...new Set(projects.map((project) => project.class).filter(Boolean))]
+    .sort((left, right) => left === "Todas" ? -1 : right === "Todas" ? 1 : compareAcademicPeriod(right, left));
+  const yearOptions = ["Todos", ...new Set(projects.map((project) => project.year).filter(Boolean))]
+    .sort((left, right) => left === "Todos" ? -1 : right === "Todos" ? 1 : compareAcademicPeriod(right, left));
+  const statusOptions = [...new Set(projects.map((project) => project.status).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "pt-BR", { sensitivity: "base" }));
   useEffect(() => setPage(1), [query, classFilter, year, oiCore, status, sort]);
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -363,9 +399,9 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
       (!q || `${p.name} ${p.area ?? ""} ${projectResources(p).join(" ")} ${p.class} ${p.description} ${p.objective ?? ""}`.toLowerCase().includes(q)) &&
       (classFilter === "Todas" || p.class === classFilter) &&
       (year === "Todos" || p.year === year) &&
-      (oiCore === "Todos" || p.oiCore === oiCore) &&
+      (oiCore === "Todos" || oiCoreKey(p.oiCore ?? "") === oiCoreKey(oiCore)) &&
       (status === "Todos" || p.status === status)
-    ).sort((a, b) => sort === "A–Z" ? a.name.localeCompare(b.name) : sort === "Mais antigos" ? a.year.localeCompare(b.year) : b.year.localeCompare(a.year));
+    ).sort((a, b) => sort === "A–Z" ? a.name.localeCompare(b.name) : sort === "Mais antigos" ? compareAcademicPeriod(projectAcademicPeriod(a), projectAcademicPeriod(b)) : compareAcademicPeriod(projectAcademicPeriod(b), projectAcademicPeriod(a)));
   }, [projects, query, classFilter, year, oiCore, status, sort]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / ARCHIVE_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -381,10 +417,10 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
         <aside className="filters">
           <h3>Filtros</h3>
           <div className="filter-content">
+            <FilterGroup title="Núcleo OI" options={["Todos", ...OI_CORE_OPTIONS]} selected={oiCore} onSelect={setOiCore} collapsed={groupCollapsed.oiCore} onToggle={() => toggleGroup("oiCore")} />
             <FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={setClassFilter} collapsed={groupCollapsed.class} onToggle={() => toggleGroup("class")} />
             <FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={setYear} collapsed={groupCollapsed.year} onToggle={() => toggleGroup("year")} />
-            <FilterGroup title="Núcleo OI" options={["Todos", ...OI_CORE_OPTIONS]} selected={oiCore} onSelect={setOiCore} collapsed={groupCollapsed.oiCore} onToggle={() => toggleGroup("oiCore")} />
-            <FilterGroup title="Status" options={["Todos", ...new Set(projects.map((project) => project.status))]} selected={status} onSelect={setStatus} collapsed={groupCollapsed.status} onToggle={() => toggleGroup("status")} />
+            <FilterGroup title="Status" options={["Todos", ...statusOptions]} selected={status} onSelect={setStatus} collapsed={groupCollapsed.status} onToggle={() => toggleGroup("status")} />
           </div>
         </aside>
         <section className="results">
@@ -436,7 +472,7 @@ function Detail({ project, projects, openAI, onAssume, claiming, selectProject, 
         {tab === "Materiais e métodos" && <div className="panel tab-content"><h3>Recursos, materiais e métodos</h3>{projectResources(project).length ? <Tags items={projectResources(project)} /> : <p>Nenhum recurso ou material informado.</p>}<p>{project.description}</p>{project.plan && <><h4>Plano de continuidade</h4><p>{project.plan}</p></>}{project.attachments?.length ? <><h4>Anexos</h4><div className="project-image-grid">{project.attachments.filter((attachment) => attachment.path && isImageAttachment(attachment.name)).map((attachment) => { const href = attachmentUrl(attachment.path); return href ? <a className="project-image-attachment" key={attachment.path} href={href} target="_blank" rel="noreferrer"><img src={href} alt={attachment.name} /><span>{attachment.name}</span></a> : null; })}</div>{project.attachments.filter((attachment) => !attachment.path || !isImageAttachment(attachment.name)).map((attachment) => { const href = attachmentUrl(attachment.path); return <p key={attachment.path ?? attachment.name}>{href ? <a href={href} target="_blank" rel="noreferrer">{attachment.name}</a> : attachment.name}</p>; })}</> : null}</div>}
         {tab === "Histórico de versões" && <div className="panel tab-content"><h3>Histórico de versões</h3>{project.versionOf ? <div className="history"><i /><div><b>Nova versão criada</b><p>{projects.find((item) => item.id === project.versionOf)?.name ?? "Projeto original"}</p></div></div> : <p>Nenhuma versão anterior registrada.</p>}</div>}
       </section>
-      <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Núcleo OI</small><b>{project.oiCore || "Não informado"}</b><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
+      <aside><div className="panel about"><h3>Sobre o projeto</h3><small>Núcleo OI</small><b>{oiCoreLabel(project.oiCore || "Não informado")}</b><small>Área / tema</small><b>{project.area || "Não informado"}</b><small>Turma / grupo</small><b>{project.class || "Não informado"}</b><small>Ano</small><b>{project.year}</b><small>Status</small><span className="pill">{project.status}</span></div><div className="panel related"><h3>Projetos relacionados</h3>{projects.filter((p) => p.id !== project.id && p.name !== project.name).slice(0, 3).map((p) => <button key={p.id ?? p.name} onClick={() => selectProject(p)}><Picture /><span><b>{p.name}</b><small>{p.area || p.class || p.year}</small></span><Icon name="chevron" size={15} /></button>)}</div></aside>
     </div>
   </div>;
 }
@@ -564,7 +600,7 @@ function Register({ onSuccess }: { onSuccess: (project: Project, files: File[]) 
     }
   };
   return <div className="page register"><h2>Cadastro de novo projeto</h2><Steps labels={labels} current={step} /><div className="register-layout"><section className="panel wizard-card">
-    {step === 0 && <><h3>Dados gerais</h3><Field label="Título do projeto *"><input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ex.: Horta comunitária" /></Field><div className="two-cols"><Field label="Área ou tema *"><input value={form.area} onChange={(e) => update("area", e.target.value)} placeholder="Ex.: cultura, pesquisa, saúde, meio ambiente" /></Field><Field label="Ano"><input value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="Ex.: 2026" /></Field></div><div className="two-cols"><Field label="Núcleo OI *"><select value={form.oiCore} onChange={(e) => update("oiCore", e.target.value)}><option value="">Selecione</option>{OI_CORE_OPTIONS.map((option) => <option key={option} value={option}>{option === "OI 3 - Sustentabilidade" ? "OI 3 · Sustentabilidade" : option}</option>)}</select></Field><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => update("class", e.target.value)} placeholder="Opcional" /></Field></div><Field label="Status"><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>Em andamento</option><option>Planejamento</option><option>Concluído</option><option>Pausado</option></select></Field><Field label="Descrição *"><textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Conte sobre a iniciativa, seu contexto e o que foi realizado..." /></Field></>}
+    {step === 0 && <><h3>Dados gerais</h3><Field label="Título do projeto *"><input value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="Ex.: Horta comunitária" /></Field><div className="two-cols"><Field label="Área ou tema *"><input value={form.area} onChange={(e) => update("area", e.target.value)} placeholder="Ex.: cultura, pesquisa, saúde, meio ambiente" /></Field><Field label="Ano"><input value={form.year} onChange={(e) => update("year", e.target.value)} placeholder="Ex.: 2026" /></Field></div><div className="two-cols"><Field label="Núcleo OI *"><select value={form.oiCore} onChange={(e) => update("oiCore", e.target.value)}><option value="">Selecione</option>{OI_CORE_OPTIONS.map((option) => <option key={option} value={option}>{oiCoreLabel(option)}</option>)}</select></Field><Field label="Turma, grupo ou unidade"><input value={form.class} onChange={(e) => update("class", e.target.value)} placeholder="Opcional" /></Field></div><Field label="Status"><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>Em andamento</option><option>Planejamento</option><option>Concluído</option><option>Pausado</option></select></Field><Field label="Descrição *"><textarea value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Conte sobre a iniciativa, seu contexto e o que foi realizado..." /></Field></>}
     {step === 1 && <GenericStep title="Participantes" text="Adicione pessoas responsáveis ou colaboradoras. Este campo é opcional.">{form.team.map((member, index) => <div className="member-input" key={index}><input value={member} onChange={(e) => update("team", form.team.map((item, i) => i === index ? e.target.value : item))} placeholder="Nome do participante" />{index > 0 && <button onClick={() => update("team", form.team.filter((_, i) => i !== index))}>×</button>}</div>)}<button className="secondary" onClick={() => update("team", [...form.team, ""])}>+ Adicionar participante</button></GenericStep>}
     {step === 2 && <GenericStep title="Objetivos e resultados" text="Registre o propósito e os resultados alcançados."><Field label="Objetivos"><textarea value={form.objective} onChange={(e) => update("objective", e.target.value)} placeholder="O que o projeto busca transformar, investigar ou realizar?" /></Field><Field label="Resultados e aprendizados"><textarea value={form.results} onChange={(e) => update("results", e.target.value)} placeholder="Descreva resultados, impactos e aprendizados..." /></Field></GenericStep>}
     {step === 3 && <GenericStep title="Recursos e métodos" text="Registre o que foi usado ou desenvolvido, seja material, técnica ou ferramenta."><Field label="Materiais, ferramentas, métodos e referências"><textarea value={form.resources} onChange={(e) => update("resources", e.target.value)} placeholder="Ex.: entrevistas, sementes, câmera, laboratório, oficina de escrita, Python... Separe os itens por vírgula ou linha." /></Field></GenericStep>}
