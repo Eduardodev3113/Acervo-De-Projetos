@@ -1,19 +1,36 @@
 # Acervo de Projetos
 
-Aplicação web para consultar, registrar e dar continuidade a projetos acadêmicos. O front-end React consome a API própria em Node.js; o Supabase fornece autenticação, banco de dados e armazenamento de imagens; a API de IA gera sugestões reais para os projetos.
+Acervo acadêmico responsivo para consultar projetos, cadastrar novas propostas e dar continuidade a trabalhos do IFSC. A API Node local foi removida: o catálogo público é gerado como JSON estático e as operações autenticadas usam o Supabase diretamente.
 
-## Como executar
+## Instalação em até 5 passos
 
-1. **Instale o Node.js 22.12 ou superior** e, na pasta clonada, instale as dependências com `npm ci`. O arquivo `.nvmrc` informa a versão mínima recomendada e `package-lock.json` fixa as dependências do projeto.
-2. **Configure o Supabase:** copie `.env.example` para `.env.local` (no PowerShell: `Copy-Item .env.example .env.local`) e preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` com os valores do projeto Supabase do acervo. Se `.env.local` já existir, edite-o sem substituir os valores existentes. Não compartilhe nem versione esse arquivo.
-3. **Prepare o banco apenas se necessário:** no painel desse mesmo projeto Supabase, execute `supabase-schema.sql` pelo SQL Editor para criar ou atualizar tabelas, permissões, auditoria e o bucket público de anexos. Para acessar os projetos e imagens já publicados, use as credenciais do Supabase compartilhado do acervo; criar outro projeto Supabase e executar somente o schema não copia os registros nem os arquivos. O login da aplicação usa e-mail e senha de uma conta institucional do IFSC.
-4. **Habilite a IA real:** preencha `AI_API_KEY` em `.env.local` com uma chave de provedor compatível com a API Chat Completions. `AI_API_URL`, `AI_MODEL` e `AI_FALLBACK_MODEL` já têm valores de exemplo em `.env.example` e podem ser ajustados conforme o provedor. A chave é lida apenas pelo servidor e não deve ser enviada ao GitHub. Sem chave, a aplicação informa que a IA não está configurada e não apresenta sugestões simuladas.
-5. **Inicie a aplicação** com `npm run dev` e abra <http://localhost:8443/>. O comando inicia o front-end e a API própria; a API fica disponível em `http://localhost:3002`.
+1. Instale o Node.js 22.12 ou superior e baixe o repositório pelo botão **Code → Download ZIP** no GitHub (ou use `git clone https://github.com/Eduardodev3113/Acervo-De-Projetos.git`).
+2. Extraia o ZIP, abra a pasta do projeto no terminal e instale os módulos com `npm ci`.
+3. Para habilitar login, cadastro e colaboração, crie um projeto Supabase, abra **SQL Editor** e execute `supabase-schema.sql`. O catálogo de leitura funciona sem essa configuração.
+4. Copie `.env.example` para `.env.local` (`Copy-Item .env.example .env.local` no PowerShell) e preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY`. Se o banco já contém os projetos e imagens, não é necessário executar o seed; para preencher um banco vazio, `npm run seed:supabase` requer os arquivos de imagem locais, que não são distribuídos no GitHub.
+5. Execute `npm run dev` e abra <http://localhost:8443/>.
 
-## Dados e imagens publicados
+O arquivo `.env.local` é local e não deve ser enviado ao GitHub nem publicado. A chave publishable pode estar no front-end; nunca use uma chave `secret` ou `service_role`.
 
-Os projetos e anexos ficam no Supabase, fora do repositório. A cópia clonada exibe os mesmos dados e imagens quando configurada com o projeto Supabase compartilhado do acervo. Não é necessário enviar as imagens novamente. Uma nova instância Supabase começa sem esses registros e arquivos; o schema cria a estrutura, mas não é uma cópia de segurança dos dados.
+## Catálogo de projetos
+
+- O acervo inclui 36 projetos: os 27 registros existentes e 9 projetos identificados nos arquivos Jackson. Os documentos repetidos foram consolidados; nomes de integrantes não foram copiados para o catálogo.
+- As imagens dos projetos são carregadas do Supabase Storage; os arquivos de imagem não são incluídos no repositório nem no build do site.
+- `supabase/seed/projects.json` fornece os metadados do catálogo. `npm run dev` e `npm run build` geram `public/api/projects.json` sem copiar imagens.
+- Depois do build, o catálogo público somente de leitura fica em `dist/api/projects.json` (GET); as imagens exibidas no site vêm dos registros do Supabase e não desse JSON.
+- O JSON é um snapshot dos 36 projetos versionados no repositório. Projetos cadastrados depois no Supabase aparecem no site quando online, mas não são exportados automaticamente para esse snapshot.
+- As sugestões do assistente são montadas localmente no navegador; nenhum conteúdo do projeto é enviado a um provedor de IA.
+
+Sem `.env.local`, o site permite consultar os metadados do catálogo incluído no código, mas não exibe as imagens armazenadas no Supabase. Login, cadastro, anexos, continuidade e histórico requerem um projeto Supabase configurado.
+
+## Publicação estática na Hostinger
+
+1. Configure as variáveis Supabase em `.env.local` se for habilitar as funções colaborativas.
+2. Execute `npm ci` e depois `npm run build`.
+3. No hPanel, abra o Gerenciador de Arquivos do domínio e envie **o conteúdo de `dist/`** para `public_html/` (não envie `.env.local`).
+4. Acesse o domínio e confirme que o catálogo e `/api/projects.json` estão disponíveis.
 
 ## Validação
 
-`npm run build` valida a compilação de produção. `npx tsc --noEmit` verifica os tipos TypeScript. A funcionalidade de sugestões de IA exige credenciais válidas do provedor.
+- `npm run build` gera o site e o catálogo de leitura.
+- `npx tsc --noEmit` verifica os tipos TypeScript.

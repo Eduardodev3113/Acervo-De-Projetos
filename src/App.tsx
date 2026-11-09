@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactElement, ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import { ATTACHMENTS_BUCKET, supabase } from "./supabase";
-import ImageOptimizer from "./ImageOptimizer";
 
-type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history" | "optimizer";
+type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history";
 type ProjectAttachment = { name: string; path?: string };
 type AuditEntry = {
   id: number;
@@ -124,6 +123,8 @@ type ProjectRow = {
   due_date: string | null;
 };
 
+type CatalogProject = (typeof import("../supabase/seed/projects.json"))["projects"][number];
+
 function normalizeAttachments(value: unknown): ProjectAttachment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): ProjectAttachment[] => {
@@ -160,6 +161,29 @@ function projectFromRow(row: ProjectRow): Project {
   };
 }
 
+function projectFromCatalog(project: CatalogProject): Project {
+  return {
+    id: project.id,
+    name: project.name,
+    class: project.project_class,
+    year: project.year,
+    tech: project.tech ?? [],
+    resources: project.resources ?? [],
+    area: project.area,
+    oiCore: project.oi_core ?? "",
+    status: project.status,
+    description: project.description,
+    objective: project.objective,
+    results: project.results,
+    team: [],
+    attachments: [],
+    mineStatus: project.status === "Concluído" ? "Concluídos" : "Em desenvolvimento",
+    versionOf: project.version_of ?? undefined,
+    plan: project.plan,
+    dueDate: project.due_date ?? undefined,
+  };
+}
+
 function projectToRow(project: Project, ownerId: string) {
   return {
     id: project.id,
@@ -185,21 +209,11 @@ function projectToRow(project: Project, ownerId: string) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Não foi possível concluir a operação.";
-}
-
-async function requestProjectsApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (!supabase) throw new Error("Configure o Supabase antes de acessar os projetos.");
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  const headers = new Headers(options.headers);
-  if (data.session?.access_token) headers.set("Authorization", `Bearer ${data.session.access_token}`);
-  if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-
-  const response = await fetch(`/api${path}`, { ...options, headers });
-  const result = await response.json().catch(() => ({})) as { error?: string };
-  if (!response.ok) throw new Error(result.error || `A API de projetos respondeu com HTTP ${response.status}.`);
-  return result as T;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+  return "Não foi possível concluir a operação.";
 }
 
 function projectResources(project: Project) {
@@ -207,7 +221,8 @@ function projectResources(project: Project) {
 }
 
 function attachmentUrl(path?: string) {
-  return path && supabase ? supabase.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(path).data.publicUrl : undefined;
+  if (!path) return undefined;
+  return supabase ? supabase.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(path).data.publicUrl : undefined;
 }
 
 function isImageAttachment(name: string) {
@@ -271,7 +286,6 @@ function Header({ screen, go, user, onOpenAuth, onSignOut, theme, toggleTheme }:
       <button className="brand" onClick={() => go("home")}><Logo /><b>Acervo de Projetos</b></button>
       <nav>
         <button className={screen === "archive" || screen === "detail" ? "active" : ""} onClick={() => go("archive")}>Acervo</button>
-        <button className={screen === "optimizer" ? "active" : ""} onClick={() => go("optimizer")}>Otimizar fotos</button>
         <button className={screen === "register" ? "active" : ""} onClick={() => go("register")}>Cadastrar</button>
         <button className={screen === "mine" ? "active" : ""} onClick={() => go("mine")}>Meus Projetos</button>
         {user?.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL && <button className={screen === "history" ? "active" : ""} onClick={() => go("history")}>Histórico</button>}
@@ -297,10 +311,10 @@ function SocialIcon({ platform }: { platform: "github" | "instagram" | "linkedin
 function FooterDialog({ panel, close }: { panel: FooterPanel; close: () => void }) {
   const titles: Record<FooterPanel, string> = { about: "Sobre o projeto", contact: "Contato", terms: "Termos de uso", privacy: "Privacidade" };
   return <><div className="overlay top" onClick={close} /><section className="info-dialog" role="dialog" aria-modal="true" aria-labelledby="footer-dialog-title"><button className="close" onClick={close} aria-label="Fechar">×</button><h2 id="footer-dialog-title">{titles[panel]}</h2>
-    {panel === "about" && <><p>Um acervo acadêmico para registrar, compartilhar e dar continuidade a projetos desenvolvidos no IFSC.</p><h3>Tecnologias</h3><p>React, TypeScript, Vite, Tailwind CSS e Supabase (autenticação, banco de dados e armazenamento de anexos).</p><h3>Criadores</h3><div className="creator"><b>Eduardo Festugatto Dall Rosa</b><a href="mailto:eduardo.r2008@aluno.ifsc.edu.br">eduardo.r2008@aluno.ifsc.edu.br</a></div><div className="creator"><b>Vinícius Augusto Madela Fornazier</b><a href="mailto:vinicius.amf20@aluno.ifsc.edu.br">vinicius.amf20@aluno.ifsc.edu.br</a></div><h3>Links</h3><div className="social-links"><a href="https://github.com/Eduardodev3113/Acervo-De-Projetos" target="_blank" rel="noreferrer"><SocialIcon platform="github" />Repositório do projeto</a><a href="https://github.com/Eduardodev3113" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@Eduardodev3113</a><a href="https://github.com/TheBigGuri" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@TheBigGuri</a><a href="https://www.instagram.com/fdr.eduardo/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@fdr.eduardo</a><a href="https://www.instagram.com/vinimadela/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@vinimadela</a><a href="https://www.linkedin.com/in/eduardo-festugatto-dall-rosa-9126753b2/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@eduardo-festugatto-dall-rosa</a><a href="https://www.linkedin.com/in/vinicius-augusto-madela-fornazier-59b4a2383/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@vinicius-augusto-madela-fornazier</a></div></>}
+    {panel === "about" && <><p>Um acervo acadêmico para registrar, compartilhar e dar continuidade a projetos desenvolvidos no IFSC.</p><h3>Tecnologias</h3><p>React, TypeScript, Vite, Tailwind CSS e Supabase (autenticação, banco de dados e armazenamento de anexos). O catálogo público também é distribuído como JSON estático.</p><h3>Criadores</h3><div className="creator"><b>Eduardo Festugatto Dall Rosa</b></div><div className="creator"><b>Vinícius Augusto Madela Fornazier</b></div><h3>Links</h3><div className="social-links"><a href="https://github.com/Eduardodev3113/Acervo-De-Projetos" target="_blank" rel="noreferrer"><SocialIcon platform="github" />Repositório do projeto</a><a href="https://github.com/Eduardodev3113" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@Eduardodev3113</a><a href="https://github.com/TheBigGuri" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@TheBigGuri</a><a href="https://www.instagram.com/fdr.eduardo/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@fdr.eduardo</a><a href="https://www.instagram.com/vinimadela/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@vinimadela</a><a href="https://www.linkedin.com/in/eduardo-festugatto-dall-rosa-9126753b2/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@eduardo-festugatto-dall-rosa</a><a href="https://www.linkedin.com/in/vinicius-augusto-madela-fornazier-59b4a2383/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@vinicius-augusto-madela-fornazier</a></div></>}
     {panel === "contact" && <><p>Fale com os criadores do acervo:</p><div className="contact-list"><a href="mailto:eduardo.r2008@aluno.ifsc.edu.br">Eduardo Festugatto Dall Rosa · eduardo.r2008@aluno.ifsc.edu.br</a><a href="mailto:vinicius.amf20@aluno.ifsc.edu.br">Vinícius Augusto Madela Fornazier · vinicius.amf20@aluno.ifsc.edu.br</a></div></>}
     {panel === "terms" && <><p>O acervo é destinado ao registro e compartilhamento de projetos acadêmicos. Ao publicar, você declara que tem autorização para enviar os textos, imagens, documentos e demais materiais incluídos.</p><p>Não publique conteúdo ilegal, protegido sem autorização ou dados pessoais e sensíveis sem consentimento. Projetos e anexos enviados ficam acessíveis publicamente no acervo.</p><p>Os criadores podem remover conteúdo inadequado. Para dúvidas ou solicitações, entre em contato pelos emails informados na seção Contato.</p></>}
-    {panel === "privacy" && <><p>O login usa seu email institucional. Os projetos e anexos enviados são armazenados no Supabase e ficam públicos para leitura e download. Evite incluir informações confidenciais ou dados pessoais de terceiros sem autorização.</p><p>Ao pedir sugestões de IA, o nome, a descrição, os objetivos, os resultados e os recursos do projeto são enviados ao provedor de IA configurado pela equipe para gerar a resposta. Não inclua dados pessoais ou confidenciais nesses campos.</p><p>Rascunhos do formulário são salvos no armazenamento local deste navegador. O Supabase também mantém os dados necessários à autenticação e ao vínculo entre a conta e os projetos.</p><p>Para solicitar correção ou remoção de conteúdo, entre em contato com os criadores pelos emails da seção Contato.</p></>}
+    {panel === "privacy" && <><p>O login usa seu email institucional. Os projetos e anexos enviados são armazenados no Supabase e ficam públicos para leitura e download. Evite incluir informações confidenciais ou dados pessoais de terceiros sem autorização.</p><p>As sugestões de desenvolvimento são montadas localmente no navegador; os dados dos projetos não são enviados a um serviço de IA.</p><p>Rascunhos do formulário são salvos no armazenamento local deste navegador. O Supabase mantém os dados necessários à autenticação e ao vínculo entre a conta e os projetos.</p><p>Para solicitar correção ou remoção de conteúdo, entre em contato com os criadores pelos emails da seção Contato.</p></>}
     <button className="primary" onClick={close}>Fechar</button>
   </section></>;
 }
@@ -368,19 +382,25 @@ function Home({ projects, go, setSearch, selectProject }: { projects: Project[];
   );
 }
 
-function FilterGroup({ title, options, selected, onSelect, collapsed, onToggle }: { title: string; options: string[]; selected: string; onSelect: (v: string) => void; collapsed: boolean; onToggle: () => void }) {
+function FilterGroup({ title, options, selected, onSelect, collapsed, onToggle, multiple = false }: { title: string; options: string[]; selected: string | string[]; onSelect: (v: string) => void; collapsed: boolean; onToggle: () => void; multiple?: boolean }) {
   return <div className={`filter-group ${collapsed ? "collapsed" : ""}`}>
     <div className="filter-group-header">
       <b>{title}</b>
       <button type="button" className="filter-mini-toggle" onClick={onToggle} aria-label={collapsed ? `Expandir ${title}` : `Recolher ${title}`}>{collapsed ? "▸" : "▾"}</button>
     </div>
-    {!collapsed && <div className="filter-options">{options.map((o) => <label key={o}><input type="radio" checked={selected === o} onChange={() => onSelect(o)} /> <span>{oiCoreLabel(o)}</span></label>)}</div>}
+    {!collapsed && <div className="filter-options">{options.map((o) => {
+      const selectedValues = Array.isArray(selected) ? selected : [];
+      const checked = multiple
+        ? o === options[0] ? selectedValues.length === 0 : selectedValues.includes(o)
+        : selected === o;
+      return <label key={o}><input type={multiple ? "checkbox" : "radio"} checked={checked} onChange={() => onSelect(o)} /> <span>{oiCoreLabel(o)}</span></label>;
+    })}</div>}
   </div>;
 }
 
 function Archive({ projects, go, query, setQuery, selectProject }: { projects: Project[]; go: (s: Screen) => void; query: string; setQuery: (v: string) => void; selectProject: (p: Project) => void }) {
-  const [classFilter, setClassFilter] = useState("Todas");
-  const [year, setYear] = useState("Todos");
+  const [classFilter, setClassFilter] = useState<string[]>([]);
+  const [year, setYear] = useState<string[]>([]);
   const [oiCore, setOiCore] = useState("Todos");
   const [status, setStatus] = useState("Todos");
   const [sort, setSort] = useState("Mais recentes");
@@ -390,15 +410,15 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
     .sort((left, right) => left === "Todas" ? -1 : right === "Todas" ? 1 : compareAcademicPeriod(right, left));
   const yearOptions = ["Todos", ...new Set(projects.map((project) => project.year).filter(Boolean))]
     .sort((left, right) => left === "Todos" ? -1 : right === "Todos" ? 1 : compareAcademicPeriod(right, left));
-  const statusOptions = [...new Set(projects.map((project) => project.status).filter(Boolean))]
+  const statusOptions = [...new Set([...projects.map((project) => project.status).filter(Boolean), "Em desenvolvimento"])]
     .sort((left, right) => left.localeCompare(right, "pt-BR", { sensitivity: "base" }));
   useEffect(() => setPage(1), [query, classFilter, year, oiCore, status, sort]);
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
     return projects.filter((p) =>
       (!q || `${p.name} ${p.area ?? ""} ${projectResources(p).join(" ")} ${p.class} ${p.description} ${p.objective ?? ""}`.toLowerCase().includes(q)) &&
-      (classFilter === "Todas" || p.class === classFilter) &&
-      (year === "Todos" || p.year === year) &&
+      (!classFilter.length || classFilter.includes(p.class)) &&
+      (!year.length || year.includes(p.year)) &&
       (oiCore === "Todos" || oiCoreKey(p.oiCore ?? "") === oiCoreKey(oiCore)) &&
       (status === "Todos" || p.status === status)
     ).sort((a, b) => sort === "A–Z" ? a.name.localeCompare(b.name) : sort === "Mais antigos" ? compareAcademicPeriod(projectAcademicPeriod(a), projectAcademicPeriod(b)) : compareAcademicPeriod(projectAcademicPeriod(b), projectAcademicPeriod(a)));
@@ -409,6 +429,13 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
   const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstVisiblePage + index);
   const visibleProjects = filtered.slice((currentPage - 1) * ARCHIVE_PAGE_SIZE, currentPage * ARCHIVE_PAGE_SIZE);
   const toggleGroup = (key: keyof typeof groupCollapsed) => setGroupCollapsed((current) => ({ ...current, [key]: !current[key] }));
+  const toggleMultiFilter = (selected: string[], setSelected: (next: string[]) => void, option: string, allLabel: string) => {
+    if (option === allLabel) {
+      setSelected([]);
+      return;
+    }
+    setSelected(selected.includes(option) ? selected.filter((value) => value !== option) : [...selected, option]);
+  };
   const open = (p: Project) => { selectProject(p); go("detail"); };
   return (
     <div className="page archive">
@@ -418,14 +445,14 @@ function Archive({ projects, go, query, setQuery, selectProject }: { projects: P
           <h3>Filtros</h3>
           <div className="filter-content">
             <FilterGroup title="Núcleo OI" options={["Todos", ...OI_CORE_OPTIONS]} selected={oiCore} onSelect={setOiCore} collapsed={groupCollapsed.oiCore} onToggle={() => toggleGroup("oiCore")} />
-            <FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={setClassFilter} collapsed={groupCollapsed.class} onToggle={() => toggleGroup("class")} />
-            <FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={setYear} collapsed={groupCollapsed.year} onToggle={() => toggleGroup("year")} />
+            <FilterGroup title="Turma / grupo" options={classOptions} selected={classFilter} onSelect={(option) => toggleMultiFilter(classFilter, setClassFilter, option, "Todas")} collapsed={groupCollapsed.class} onToggle={() => toggleGroup("class")} multiple />
+            <FilterGroup title="Ano" options={yearOptions} selected={year} onSelect={(option) => toggleMultiFilter(year, setYear, option, "Todos")} collapsed={groupCollapsed.year} onToggle={() => toggleGroup("year")} multiple />
             <FilterGroup title="Status" options={["Todos", ...statusOptions]} selected={status} onSelect={setStatus} collapsed={groupCollapsed.status} onToggle={() => toggleGroup("status")} />
           </div>
         </aside>
         <section className="results">
           <div className="result-head"><b>{filtered.length} resultados encontrados</b><label>Ordenar por: <select value={sort} onChange={(e) => setSort(e.target.value)}><option>Mais recentes</option><option>Mais antigos</option><option>A–Z</option></select></label></div>
-          {filtered.length ? <div className="cards-grid">{visibleProjects.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter("Todas"); setYear("Todos"); setOiCore("Todos"); setStatus("Todos"); }}>Limpar filtros</button></div>}
+          {filtered.length ? <div className="cards-grid">{visibleProjects.map((p) => <ProjectCard key={p.id ?? p.name} project={p} onClick={() => open(p)} />)}</div> : <div className="empty"><Icon name="search" size={32} /><h3>Nenhum projeto encontrado</h3><p>Tente ajustar sua busca ou os filtros selecionados.</p><button className="secondary" onClick={() => { setQuery(""); setClassFilter([]); setYear([]); setOiCore("Todos"); setStatus("Todos"); }}>Limpar filtros</button></div>}
           {pageCount > 1 && <div className="pagination" aria-label="Paginação do acervo"><button type="button" aria-label="Página anterior" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>‹</button>{pageNumbers.map((pageNumber) => <button type="button" key={pageNumber} className={currentPage === pageNumber ? "selected" : ""} aria-label={`Página ${pageNumber}`} aria-current={currentPage === pageNumber ? "page" : undefined} onClick={() => setPage(pageNumber)}>{pageNumber}</button>)}<span className="pagination-status">{currentPage} / {pageCount}</span><button type="button" aria-label="Próxima página" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>›</button></div>}
         </section>
       </div>
@@ -457,12 +484,13 @@ function ProjectHero({ project, openAI, assume, claiming, canDelete, canAbandon,
       setUploadingImages(false);
     }
   };
-  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões IA</button>{canAddImages && <><button className="secondary" disabled={actionBusy || uploadingImages} onClick={() => imageInputRef.current?.click()}>{uploadingImages ? "Enviando imagens..." : "Adicionar imagens"}</button><input ref={imageInputRef} className="image-file-input" type="file" accept="image/png,image/jpeg" multiple onChange={uploadImages} /></>}{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}{imageUploadError && <p className="form-error image-upload-error" role="alert">{imageUploadError}</p>}</div></div>;
+  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões locais</button>{canAddImages && <><button className="secondary" disabled={actionBusy || uploadingImages} onClick={() => imageInputRef.current?.click()}>{uploadingImages ? "Enviando imagens..." : "Adicionar imagens"}</button><input ref={imageInputRef} className="image-file-input" type="file" accept="image/png,image/jpeg" multiple onChange={uploadImages} /></>}{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}{imageUploadError && <p className="form-error image-upload-error" role="alert">{imageUploadError}</p>}</div></div>;
 }
 
-function Detail({ project, projects, openAI, onAssume, claiming, selectProject, canDelete, canAbandon, canAddImages, actionBusy, onDelete, onAbandon, onAddImages }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; canAddImages: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void; onAddImages: (files: File[]) => Promise<void> }) {
+function Detail({ project, projects, openAI, onAssume, onBack, claiming, selectProject, canDelete, canAbandon, canAddImages, actionBusy, onDelete, onAbandon, onAddImages }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; onBack: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; canAddImages: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void; onAddImages: (files: File[]) => Promise<void> }) {
   const [tab, setTab] = useState("Ficha");
   return <div className="page detail">
+    <button type="button" className="secondary detail-back" onClick={onBack}>← Voltar ao acervo</button>
     <div className="breadcrumb">Acervo <span>›</span> {project.name}</div>
     <ProjectHero project={project} openAI={openAI} assume={onAssume} claiming={claiming} canDelete={canDelete} canAbandon={canAbandon} canAddImages={canAddImages} actionBusy={actionBusy} onDelete={onDelete} onAbandon={onAbandon} onAddImages={onAddImages} />
     <div className="tabs">{["Ficha", "Materiais e métodos", "Histórico de versões"].map((t) => <button className={tab === t ? "active" : ""} onClick={() => setTab(t)} key={t}>{t}</button>)}</div>
@@ -507,15 +535,21 @@ function Continuity({ project, initialPlan, onSuccess, onCancel }: { project: Pr
   const [team, setTeam] = useState<string[]>(draft.team);
   const [form, setForm] = useState(draft.form);
   useEffect(() => {
-    if (!supabase || !project.id || !UUID_PATTERN.test(project.id)) return;
+    const client = supabase;
+    if (!client || !project.id || !UUID_PATTERN.test(project.id)) return;
     let active = true;
     const interval = window.setInterval(() => {
-      void requestProjectsApi(`/projects/${project.id}/claim/renew`, { method: "POST" }).catch((error: unknown) => {
-        if (active) {
-          setClaimValid(false);
-          setSaveError(errorMessage(error));
+      void (async () => {
+        try {
+          const { error } = await client.rpc("renew_project_claim", { target_project_id: project.id });
+          if (error) throw error;
+        } catch (error) {
+          if (active) {
+            setClaimValid(false);
+            setSaveError(errorMessage(error));
+          }
         }
-      });
+      })();
     }, 4 * 60 * 1000);
     return () => { active = false; window.clearInterval(interval); };
   }, [project.id]);
@@ -615,51 +649,47 @@ function GenericStep({ title, text, children }: { title: string; text: string; c
 
 function Mine({ projects, go, selectProject, onDeleteProject, onAbandonContinuation, actionPendingId }: { projects: Project[]; go: (s: Screen) => void; selectProject: (p: Project) => void; onDeleteProject: (project: Project) => void; onAbandonContinuation: (project: Project) => void; actionPendingId: string | null }) {
   const [filter, setFilter] = useState("Todos");
-  const statuses = ["Todos", "Em desenvolvimento", "Assumidos", "Abandonados", "Rascunhos", "Concluídos"];
+  const statuses = ["Todos", "Em desenvolvimento", "Assumidos", "Concluídos"];
   const shown = filter === "Todos" ? projects : projects.filter((p) => p.mineStatus === filter);
-  return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos que você criou ou assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div><div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /><div className="mine-project-actions">{p.versionOf && ["Em andamento", "Planejamento"].includes(p.status) && <button className="secondary" disabled={actionPendingId === p.id} onClick={() => onAbandonContinuation(p)}>{actionPendingId === p.id ? "Aguarde..." : "Abandonar continuação"}</button>}<button className="danger" disabled={actionPendingId === p.id} onClick={() => onDeleteProject(p)}>{actionPendingId === p.id ? "Aguarde..." : "Excluir projeto"}</button></div></div>)}</div></div>;
+  return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos cuja continuidade você assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div>{shown.length ? <div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /><div className="mine-project-actions">{p.versionOf && ["Em andamento", "Planejamento"].includes(p.status) && <button className="secondary" disabled={actionPendingId === p.id} onClick={() => onAbandonContinuation(p)}>{actionPendingId === p.id ? "Aguarde..." : "Abandonar continuação"}</button>}<button className="danger" disabled={actionPendingId === p.id} onClick={() => onDeleteProject(p)}>{actionPendingId === p.id ? "Aguarde..." : "Excluir projeto"}</button></div></div>)}</div> : <div className="empty"><h3>Nenhuma continuação assumida</h3><p>Os projetos do acervo só aparecem aqui depois que você assume manualmente a continuidade de um deles.</p></div>}</div>;
 }
 
 type Suggestion = { id: number; title: string; text: string; added: boolean };
+function createLocalSuggestions(project: Project): Omit<Suggestion, "id" | "added">[] {
+  const objective = project.objective?.trim() || project.description;
+  const resources = projectResources(project);
+  const resourceList = resources.length ? resources.slice(0, 3).join(", ") : "os recursos disponíveis";
+  return [
+    {
+      title: "Validar a solução com o público-alvo",
+      text: `Converse com pessoas que vivenciam o problema de “${project.name}”, apresente a proposta e registre dúvidas, barreiras e mudanças prioritárias.`,
+    },
+    {
+      title: "Transformar o objetivo em etapas verificáveis",
+      text: `Divida este objetivo em entregas pequenas: ${objective} Defina para cada etapa um responsável, um prazo e um critério simples de conclusão.`,
+    },
+    {
+      title: "Planejar um protótipo de baixo custo",
+      text: `Comece com uma versão que use ${resourceList}. Teste o fluxo principal antes de ampliar funcionalidades e documente o que precisa ser ajustado.`,
+    },
+    {
+      title: "Registrar evidências de resultado",
+      text: "Escolha indicadores observáveis, compare a situação antes e depois do teste e guarde decisões, limitações e próximos passos para facilitar a continuidade.",
+    },
+  ];
+}
+
 function AIPanel({ project, close, usePlan }: { project: Project; close: () => void; usePlan: (plan: string) => void }) {
-  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [state, setState] = useState<"idle" | "ready">("idle");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [requestError, setRequestError] = useState("");
-  const analyze = async () => {
-    setState("loading");
-    setRequestError("");
-    setSuggestions([]);
-    try {
-      const response = await fetch("/api/ai/suggestions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          project: {
-            name: project.name,
-            area: project.area,
-            description: project.description,
-            objective: project.objective,
-            results: project.results,
-            resources: projectResources(project),
-          },
-        }),
-      });
-      const result = await response.json() as { error?: string; suggestions?: Array<{ title: string; text: string }> };
-      if (!response.ok) throw new Error(result.error || "A API de IA não conseguiu analisar este projeto.");
-      if (!Array.isArray(result.suggestions) || result.suggestions.length < 2) throw new Error("A API de IA não retornou sugestões válidas.");
-      setSuggestions(result.suggestions.map((suggestion, index) => ({ ...suggestion, id: index + 1, added: false })));
-      setState("ready");
-    } catch (error) {
-      setRequestError(errorMessage(error));
-      setState("error");
-    }
+  const analyze = () => {
+    setSuggestions(createLocalSuggestions(project).map((suggestion, index) => ({ ...suggestion, id: index + 1, added: false })));
+    setState("ready");
   };
   const plan = suggestions.filter((suggestion) => suggestion.added).map((suggestion) => `${suggestion.title}: ${suggestion.text}`).join("\n");
-  return <><div className="overlay" onClick={close} /><aside className="ai-panel"><button className="close" onClick={close} aria-label="Fechar assistente"><Icon name="close" size={20} /></button><div className="ai-title"><div className="ai-brain"><Icon name="spark" /></div><div><h2>IA Assistente</h2><p>Sugestões geradas a partir dos dados deste projeto.</p></div></div><div className="ai-project"><Picture /><div><b>{project.name}</b><small>{project.area || project.class || project.year}</small><Tags items={projectResources(project).slice(0, 2)} /></div></div><button className="ai-analyze" disabled={state === "loading"} onClick={analyze}>{state === "loading" ? <><span className="spinner" /> Consultando modelo...</> : state === "ready" || state === "error" ? "Analisar novamente" : "Analisar projeto"}</button>
-    {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Analise este projeto</h3><p>O modelo vai gerar sugestões específicas usando os objetivos, resultados e recursos informados.</p></div>}
-    {state === "loading" && <div className="skeletons"><i /><i /><i /><i /></div>}
-    {state === "error" && <p className="form-error" role="alert">{requestError}</p>}
-    {state === "ready" && <div className="suggestions"><h3>Sugestões geradas pelo modelo</h3>{suggestions.map((suggestion) => <article key={suggestion.id}><div className="suggest-icon"><Icon name="spark" size={16} /></div><div><b>{suggestion.title}</b><p>{suggestion.text}</p><div><button className={suggestion.added ? "added" : "primary"} onClick={() => setSuggestions((current) => current.map((item) => item.id === suggestion.id ? { ...item, added: !item.added } : item))}>{suggestion.added ? <><Icon name="check" size={14} /> Adicionado</> : "Adicionar ao plano"}</button><button className="text-button" onClick={() => setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))}>Descartar</button></div></div></article>)}</div>}
+  return <><div className="overlay" onClick={close} /><aside className="ai-panel"><button className="close" onClick={close} aria-label="Fechar assistente"><Icon name="close" size={20} /></button><div className="ai-title"><div className="ai-brain"><Icon name="spark" /></div><div><h2>Assistente de projetos</h2><p>Sugestões criadas neste navegador, sem enviar dados a um serviço externo.</p></div></div><div className="ai-project"><Picture /><div><b>{project.name}</b><small>{project.area || project.class || project.year}</small><Tags items={projectResources(project).slice(0, 2)} /></div></div><button className="ai-analyze" onClick={analyze}>{state === "ready" ? "Gerar novamente" : "Gerar sugestões"}</button>
+    {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Planeje os próximos passos</h3><p>Receba sugestões gerais de validação, prototipagem e documentação com base nas informações deste projeto.</p></div>}
+    {state === "ready" && <div className="suggestions"><h3>Sugestões de desenvolvimento</h3>{suggestions.map((suggestion) => <article key={suggestion.id}><div className="suggest-icon"><Icon name="spark" size={16} /></div><div><b>{suggestion.title}</b><p>{suggestion.text}</p><div><button className={suggestion.added ? "added" : "primary"} onClick={() => setSuggestions((current) => current.map((item) => item.id === suggestion.id ? { ...item, added: !item.added } : item))}>{suggestion.added ? <><Icon name="check" size={14} /> Adicionado</> : "Adicionar ao plano"}</button><button className="text-button" onClick={() => setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))}>Descartar</button></div></div></article>)}</div>}
     <button className="use-plan" disabled={!plan} onClick={() => usePlan(plan)}>Usar no plano da Nova Versão</button>
   </aside></>;
 }
@@ -733,10 +763,29 @@ function AuditHistory() {
     let active = true;
     setLoading(true);
     setError("");
-    void requestProjectsApi<{ events: AuditEntry[] }>("/audit-log")
-      .then(({ events }) => { if (active) setEntries(events); })
-      .catch((reason: unknown) => { if (active) setError(errorMessage(reason)); })
-      .finally(() => { if (active) setLoading(false); });
+    const client = supabase;
+    if (!client) {
+      setError("Configure o Supabase para consultar o histórico.");
+      setLoading(false);
+      return () => { active = false; };
+    }
+    void client.from("project_audit_log")
+      .select("id,table_name,record_id,operation,actor_email,changed_at,old_data,new_data")
+      .order("changed_at", { ascending: false })
+      .limit(500)
+      .then(
+        ({ data, error: queryError }) => {
+          if (!active) return;
+          if (queryError) setError(errorMessage(queryError));
+          else setEntries(data ?? []);
+          setLoading(false);
+        },
+        (reason: unknown) => {
+          if (!active) return;
+          setError(errorMessage(reason));
+          setLoading(false);
+        },
+      );
     return () => { active = false; };
   }, [refreshKey]);
 
@@ -753,10 +802,12 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [query, setQuery] = useState("");
+  const [bundledProjects, setBundledProjects] = useState<Project[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [remoteProjects, setRemoteProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(Boolean(supabase));
-  const [notice, setNotice] = useState(supabase ? "" : "Supabase ainda não está configurado. Crie o arquivo .env.local para habilitar login e salvamento.");
+  const [notice, setNotice] = useState(supabase ? "" : "Catálogo local disponível. Configure o Supabase para login e ações colaborativas.");
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingScreen, setPendingScreen] = useState<Screen | null>(null);
   const [claimingProjectId, setClaimingProjectId] = useState<string | null>(null);
@@ -766,8 +817,27 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false);
   const [plan, setPlan] = useState("");
   const [success, setSuccess] = useState<null | "version" | "project">(null);
-  const projects = remoteProjects;
-  const mineProjects = user ? remoteProjects.filter((project) => project.ownerId === user.id) : [];
+  const projects = useMemo(() => {
+    const merged = new Map(bundledProjects.map((project) => [project.id ?? project.name, project]));
+    for (const project of remoteProjects) merged.set(project.id ?? project.name, project);
+    return [...merged.values()].sort((left, right) => compareAcademicPeriod(projectAcademicPeriod(right), projectAcademicPeriod(left)));
+  }, [bundledProjects, remoteProjects]);
+  const mineProjects = user ? remoteProjects.filter((project) => project.ownerId === user.id && Boolean(project.versionOf)) : [];
+
+  useEffect(() => {
+    let active = true;
+    void import("../supabase/seed/projects.json")
+      .then(({ default: catalog }) => {
+        if (active) setBundledProjects(catalog.projects.map(projectFromCatalog));
+      })
+      .catch((error: unknown) => {
+        if (active) setNotice(`Não foi possível carregar o catálogo incluído no site: ${errorMessage(error)}`);
+      })
+      .finally(() => {
+        if (active) setCatalogLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("acervo-projetos:theme");
@@ -803,7 +873,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
+    const client = supabase;
+    if (!client) {
       setLoadingProjects(false);
       return;
     }
@@ -819,18 +890,26 @@ export default function App() {
               id: project.id ?? crypto.randomUUID(),
               attachments: normalizeAttachments(project.attachments),
             }, user.id));
-            const { imported } = await requestProjectsApi<{ imported: number }>("/projects/import", {
-              method: "POST",
-              body: JSON.stringify({ projects: rows }),
-            });
+            const { data: existingRows, error: lookupError } = await client
+              .from("projects")
+              .select("id")
+              .in("id", rows.map((row) => row.id));
+            if (lookupError) throw lookupError;
+            const existingIds = new Set((existingRows ?? []).map((row) => row.id));
+            const rowsToImport = rows.filter((row) => !existingIds.has(row.id));
+            for (let offset = 0; offset < rowsToImport.length; offset += 100) {
+              const { error: importError } = await client.from("projects").insert(rowsToImport.slice(offset, offset + 100));
+              if (importError) throw importError;
+            }
             window.localStorage.removeItem(LEGACY_PROJECTS_STORAGE_KEY);
-            setNotice(`${imported} projeto(s) local(is) importado(s) para o Supabase.`);
+            setNotice(`${rowsToImport.length} projeto(s) local(is) importado(s) para o Supabase.`);
           }
         }
-        const { projects: rows } = await requestProjectsApi<{ projects: ProjectRow[] }>("/projects");
-        if (active) setRemoteProjects(rows.map((row) => projectFromRow(row)));
+        const { data: rows, error: queryError } = await client.from("projects").select("*").order("created_at", { ascending: false });
+        if (queryError) throw queryError;
+        if (active) setRemoteProjects((rows ?? []).map((row) => projectFromRow(row)));
       } catch (error) {
-        if (active) setNotice(`Erro ao carregar projetos pela API: ${errorMessage(error)}`);
+        if (active) setNotice(`Não foi possível carregar projetos online; o catálogo local continua disponível. ${errorMessage(error)}`);
       } finally {
         if (active) setLoadingProjects(false);
       }
@@ -842,7 +921,8 @@ export default function App() {
   const releaseProjectClaim = async (projectId: string, account = user) => {
     if (!supabase || !account) return;
     try {
-      await requestProjectsApi(`/projects/${projectId}/claim/release`, { method: "POST" });
+      const { error } = await supabase.rpc("release_project_claim", { target_project_id: projectId });
+      if (error) throw error;
       setClaimedProjectId((current) => current === projectId ? null : current);
     } catch (error) {
       setNotice(`Não foi possível liberar a reserva: ${errorMessage(error)}`);
@@ -861,9 +941,22 @@ export default function App() {
     if (!window.confirm(`Excluir permanentemente “${project.name}”? Esta ação não pode ser desfeita.`)) return;
     setProjectActionId(project.id);
     try {
-      await requestProjectsApi(`/projects/${project.id}`, { method: "DELETE" });
+      if (!supabase) throw new Error("Configure o Supabase antes de excluir projetos.");
+      const { data: deleted, error } = await supabase.from("projects").delete().eq("id", project.id).select("id").maybeSingle();
+      if (error) throw error;
+      if (!deleted) throw new Error("O projeto não existe no banco ou sua conta não tem permissão para excluí-lo.");
       setRemoteProjects((current) => current.filter((item) => item.id !== project.id));
       if (selected.id === project.id) setScreen("archive");
+      const attachmentPaths = normalizeAttachments(project.attachments)
+        .map((attachment) => attachment.path)
+        .filter((path): path is string => Boolean(path));
+      if (attachmentPaths.length) {
+        const { error: storageError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(attachmentPaths);
+        if (storageError) {
+          setNotice(`O projeto foi excluído, mas alguns anexos não puderam ser removidos: ${storageError.message}`);
+          return;
+        }
+      }
       setNotice(`Projeto “${project.name}” excluído.`);
     } catch (error) {
       setNotice(`Não foi possível excluir o projeto: ${errorMessage(error)}`);
@@ -880,11 +973,28 @@ export default function App() {
     if (!window.confirm(`Abandonar a continuação “${project.name}”? Ela ficará pausada e outra pessoa poderá continuar o projeto.`)) return;
     setProjectActionId(project.id);
     try {
-      await requestProjectsApi(`/projects/${project.id}/abandon`, { method: "POST" });
+      if (!supabase) throw new Error("Configure o Supabase antes de alterar projetos.");
+      const { data: abandonedRow, error } = await supabase.from("projects")
+        .update({ status: "Pausado", mine_status: "Abandonados" })
+        .eq("id", project.id)
+        .eq("owner_id", user.id)
+        .not("version_of", "is", null)
+        .in("status", ["Em andamento", "Planejamento"])
+        .select("id,version_of")
+        .maybeSingle();
+      if (error) throw error;
+      if (!abandonedRow) throw new Error("A continuação não existe ou sua conta não pode pausá-la.");
       const abandoned = { ...project, status: "Pausado", mineStatus: "Abandonados" };
       setRemoteProjects((current) => current.map((item) => item.id === project.id ? abandoned : item));
       setSelected((current) => current.id === project.id ? abandoned : current);
       setClaimedProjectId((current) => current === project.versionOf ? null : current);
+      if (abandonedRow.version_of) {
+        const { error: releaseError } = await supabase.rpc("release_project_claim", { target_project_id: abandonedRow.version_of });
+        if (releaseError) {
+          setNotice(`A continuação foi pausada, mas a reserva não foi liberada: ${releaseError.message}`);
+          return;
+        }
+      }
       setNotice(`A continuação “${project.name}” foi pausada e a reserva liberada.`);
     } catch (error) {
       setNotice(`Não foi possível abandonar a continuação: ${errorMessage(error)}`);
@@ -918,7 +1028,8 @@ export default function App() {
     }
     setClaimingProjectId(project.id);
     try {
-      await requestProjectsApi(`/projects/${project.id}/claim`, { method: "POST" });
+      const { error } = await supabase.rpc("claim_project", { target_project_id: project.id });
+      if (error) throw error;
       setClaimedProjectId(project.id);
       setScreen("continuity");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -978,16 +1089,20 @@ export default function App() {
         attachments.push({ name: file.name, path });
       }
       const savedProject = { ...project, id, ownerId: user.id, attachments };
-      const { project: row } = await requestProjectsApi<{ project: ProjectRow }>("/projects", {
-        method: "POST",
-        body: JSON.stringify({ project: projectToRow(savedProject, user.id) }),
-      });
+      const { data: row, error: insertError } = await supabase.from("projects")
+        .insert(projectToRow(savedProject, user.id))
+        .select("*")
+        .single();
+      if (insertError) throw insertError;
       const persisted = projectFromRow(row);
       setRemoteProjects((current) => [persisted, ...current.filter((item) => item.id !== persisted.id)]);
       setSelected(persisted);
       setSuccess(successType);
     } catch (error) {
-      if (uploadedPaths.length) await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+      if (uploadedPaths.length) {
+        const { error: cleanupError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+        if (cleanupError) console.error(`Não foi possível remover anexos enviados após falha: ${cleanupError.message}`);
+      }
       throw error;
     }
   };
@@ -1007,16 +1122,20 @@ export default function App() {
         uploadedPaths.push(path);
         images.push({ name: file.name, path });
       }
-      const { attachments } = await requestProjectsApi<{ attachments: ProjectAttachment[] }>(`/projects/${project.id}/images`, {
-        method: "POST",
-        body: JSON.stringify({ images }),
+      const { data: attachments, error: appendError } = await supabase.rpc("append_project_images", {
+        target_project_id: project.id,
+        new_images: images,
       });
+      if (appendError) throw appendError;
       const updatedProject = { ...project, attachments };
       setRemoteProjects((current) => current.map((item) => item.id === project.id ? updatedProject : item));
       setSelected((current) => current.id === project.id ? updatedProject : current);
       setNotice(`${images.length} imagem(ns) adicionada(s) ao projeto.`);
     } catch (error) {
-      if (uploadedPaths.length) await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+      if (uploadedPaths.length) {
+        const { error: cleanupError } = await supabase.storage.from(ATTACHMENTS_BUCKET).remove(uploadedPaths);
+        if (cleanupError) console.error(`Não foi possível remover imagens enviadas após falha: ${cleanupError.message}`);
+      }
       throw error;
     }
   };
@@ -1047,18 +1166,17 @@ export default function App() {
     if (error) setNotice(error.message);
     else { setScreen("home"); setNotice("Você saiu da sua conta."); }
   };
-  const canDeleteSelectedProject = Boolean(user && (selected.ownerId === user.id || isProjectAdmin(user.email)));
+  const canDeleteSelectedProject = Boolean(user && selected.ownerId && (selected.ownerId === user.id || isProjectAdmin(user.email)));
   const canAbandonSelectedProject = Boolean(user && selected.ownerId === user.id && selected.versionOf && ["Em andamento", "Planejamento"].includes(selected.status));
   const canAddImagesToSelectedProject = Boolean(user && selected.id && selected.status.trim().toLowerCase() === "concluído" && (
     user.email?.trim().toLowerCase() === PROJECT_IMAGE_ADMIN_EMAIL
     || projects.some((project) => project.versionOf === selected.id && project.ownerId === user.id && ["Em andamento", "Planejamento"].includes(project.status))
   ));
   return <Shell screen={screen} go={go} user={user} onOpenAuth={() => setAuthOpen(true)} onSignOut={signOut} notice={notice} dismissNotice={() => setNotice("")} theme={theme} toggleTheme={toggleTheme}>
-    {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
+    {(loadingProjects || catalogLoading) && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
-    {screen === "optimizer" && <ImageOptimizer />}
-    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} canAddImages={canAddImagesToSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} onAddImages={(files) => addProjectImages(selected, files)} />}
+    {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} onBack={() => setScreen("archive")} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} canAddImages={canAddImagesToSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} onAddImages={(files) => addProjectImages(selected, files)} />}
     {screen === "continuity" && <Continuity project={selected} initialPlan={plan} onSuccess={saveVersion} onCancel={() => { if (claimedProjectId) void releaseProjectClaim(claimedProjectId); setScreen("detail"); }} />}
     {screen === "register" && <Register onSuccess={saveProject} />}
     {screen === "mine" && <Mine projects={mineProjects} go={go} selectProject={selectProject} onDeleteProject={(project) => { void deleteProject(project); }} onAbandonContinuation={(project) => { void abandonContinuation(project); }} actionPendingId={projectActionId} />}
