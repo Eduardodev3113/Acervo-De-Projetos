@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactElement, ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
+import { getProjectSuggestions, getProjects, sendChatMessage } from "./api";
+import type { CatalogProject, ChatMessage, ProjectRow, ProjectSuggestion } from "./api";
 import { ATTACHMENTS_BUCKET, supabase } from "./supabase";
 
 type Screen = "home" | "archive" | "detail" | "continuity" | "register" | "mine" | "history";
@@ -101,30 +103,6 @@ function readSavedProjects(): Project[] {
   }
 }
 
-type ProjectRow = {
-  id: string;
-  owner_id: string;
-  name: string;
-  project_class: string;
-  year: string;
-  tech: string[];
-  resources: string[];
-  area: string;
-  oi_core: string;
-  status: string;
-  description: string;
-  objective: string;
-  results: string;
-  team: string[];
-  attachments: unknown;
-  mine_status: string;
-  version_of: string | null;
-  plan: string;
-  due_date: string | null;
-};
-
-type CatalogProject = (typeof import("../supabase/seed/projects.json"))["projects"][number];
-
 function normalizeAttachments(value: unknown): ProjectAttachment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): ProjectAttachment[] => {
@@ -176,7 +154,7 @@ function projectFromCatalog(project: CatalogProject): Project {
     objective: project.objective,
     results: project.results,
     team: [],
-    attachments: [],
+    attachments: normalizeAttachments(project.attachments),
     mineStatus: project.status === "Concluído" ? "Concluídos" : "Em desenvolvimento",
     versionOf: project.version_of ?? undefined,
     plan: project.plan,
@@ -311,10 +289,10 @@ function SocialIcon({ platform }: { platform: "github" | "instagram" | "linkedin
 function FooterDialog({ panel, close }: { panel: FooterPanel; close: () => void }) {
   const titles: Record<FooterPanel, string> = { about: "Sobre o projeto", contact: "Contato", terms: "Termos de uso", privacy: "Privacidade" };
   return <><div className="overlay top" onClick={close} /><section className="info-dialog" role="dialog" aria-modal="true" aria-labelledby="footer-dialog-title"><button className="close" onClick={close} aria-label="Fechar">×</button><h2 id="footer-dialog-title">{titles[panel]}</h2>
-    {panel === "about" && <><p>Um acervo acadêmico para registrar, compartilhar e dar continuidade a projetos desenvolvidos no IFSC.</p><h3>Tecnologias</h3><p>React, TypeScript, Vite, Tailwind CSS e Supabase (autenticação, banco de dados e armazenamento de anexos). O catálogo público também é distribuído como JSON estático.</p><h3>Criadores</h3><div className="creator"><b>Eduardo Festugatto Dall Rosa</b></div><div className="creator"><b>Vinícius Augusto Madela Fornazier</b></div><h3>Links</h3><div className="social-links"><a href="https://github.com/Eduardodev3113/Acervo-De-Projetos" target="_blank" rel="noreferrer"><SocialIcon platform="github" />Repositório do projeto</a><a href="https://github.com/Eduardodev3113" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@Eduardodev3113</a><a href="https://github.com/TheBigGuri" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@TheBigGuri</a><a href="https://www.instagram.com/fdr.eduardo/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@fdr.eduardo</a><a href="https://www.instagram.com/vinimadela/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@vinimadela</a><a href="https://www.linkedin.com/in/eduardo-festugatto-dall-rosa-9126753b2/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@eduardo-festugatto-dall-rosa</a><a href="https://www.linkedin.com/in/vinicius-augusto-madela-fornazier-59b4a2383/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@vinicius-augusto-madela-fornazier</a></div></>}
+    {panel === "about" && <><p>Um acervo acadêmico para registrar, compartilhar e dar continuidade a projetos desenvolvidos no IFSC.</p><h3>Tecnologias</h3><p>React, TypeScript, Vite, Tailwind CSS, API Node.js autoral, Supabase (autenticação, banco de dados e armazenamento de anexos) e Google Gemini para gerar sugestões de continuidade.</p><h3>Criadores</h3><div className="creator"><b>Eduardo Festugatto Dall Rosa</b></div><div className="creator"><b>Vinícius Augusto Madela Fornazier</b></div><h3>Links</h3><div className="social-links"><a href="https://github.com/Eduardodev3113/Acervo-De-Projetos" target="_blank" rel="noreferrer"><SocialIcon platform="github" />Repositório do projeto</a><a href="https://github.com/Eduardodev3113" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@Eduardodev3113</a><a href="https://github.com/TheBigGuri" target="_blank" rel="noreferrer"><SocialIcon platform="github" />@TheBigGuri</a><a href="https://www.instagram.com/fdr.eduardo/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@fdr.eduardo</a><a href="https://www.instagram.com/vinimadela/" target="_blank" rel="noreferrer"><SocialIcon platform="instagram" />@vinimadela</a><a href="https://www.linkedin.com/in/eduardo-festugatto-dall-rosa-9126753b2/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@eduardo-festugatto-dall-rosa</a><a href="https://www.linkedin.com/in/vinicius-augusto-madela-fornazier-59b4a2383/" target="_blank" rel="noreferrer"><SocialIcon platform="linkedin" />@vinicius-augusto-madela-fornazier</a></div></>}
     {panel === "contact" && <><p>Fale com os criadores do acervo:</p><div className="contact-list"><a href="mailto:eduardo.r2008@aluno.ifsc.edu.br">Eduardo Festugatto Dall Rosa · eduardo.r2008@aluno.ifsc.edu.br</a><a href="mailto:vinicius.amf20@aluno.ifsc.edu.br">Vinícius Augusto Madela Fornazier · vinicius.amf20@aluno.ifsc.edu.br</a></div></>}
     {panel === "terms" && <><p>O acervo é destinado ao registro e compartilhamento de projetos acadêmicos. Ao publicar, você declara que tem autorização para enviar os textos, imagens, documentos e demais materiais incluídos.</p><p>Não publique conteúdo ilegal, protegido sem autorização ou dados pessoais e sensíveis sem consentimento. Projetos e anexos enviados ficam acessíveis publicamente no acervo.</p><p>Os criadores podem remover conteúdo inadequado. Para dúvidas ou solicitações, entre em contato pelos emails informados na seção Contato.</p></>}
-    {panel === "privacy" && <><p>O login usa seu email institucional. Os projetos e anexos enviados são armazenados no Supabase e ficam públicos para leitura e download. Evite incluir informações confidenciais ou dados pessoais de terceiros sem autorização.</p><p>As sugestões de desenvolvimento são montadas localmente no navegador; os dados dos projetos não são enviados a um serviço de IA.</p><p>Rascunhos do formulário são salvos no armazenamento local deste navegador. O Supabase mantém os dados necessários à autenticação e ao vínculo entre a conta e os projetos.</p><p>Para solicitar correção ou remoção de conteúdo, entre em contato com os criadores pelos emails da seção Contato.</p></>}
+    {panel === "privacy" && <><p>O login usa seu email institucional. Os projetos e anexos enviados são armazenados no Supabase e ficam públicos para leitura e download. Evite incluir informações confidenciais ou dados pessoais de terceiros sem autorização.</p><p>Quando você solicita sugestões no assistente, os dados descritivos do projeto são enviados pela API do acervo ao Google Gemini para gerar recomendações. A chave do serviço permanece no servidor e não é publicada no navegador.</p><p>Rascunhos do formulário são salvos no armazenamento local deste navegador. O Supabase mantém os dados necessários à autenticação e ao vínculo entre a conta e os projetos.</p><p>Para solicitar correção ou remoção de conteúdo, entre em contato com os criadores pelos emails da seção Contato.</p></>}
     <button className="primary" onClick={close}>Fechar</button>
   </section></>;
 }
@@ -484,7 +462,7 @@ function ProjectHero({ project, openAI, assume, claiming, canDelete, canAbandon,
       setUploadingImages(false);
     }
   };
-  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Sugestões locais</button>{canAddImages && <><button className="secondary" disabled={actionBusy || uploadingImages} onClick={() => imageInputRef.current?.click()}>{uploadingImages ? "Enviando imagens..." : "Adicionar imagens"}</button><input ref={imageInputRef} className="image-file-input" type="file" accept="image/png,image/jpeg" multiple onChange={uploadImages} /></>}{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}{imageUploadError && <p className="form-error image-upload-error" role="alert">{imageUploadError}</p>}</div></div>;
+  return <div className="project-hero"><Picture /><div className="project-hero-copy"><div><h2>{project.name}</h2><small>{project.area || (project.class ? `Turma ${project.class}` : "Área não informada")} · {project.year}</small><Tags items={projectResources(project)} /></div><span className="pill">{project.status}</span></div><div className="hero-actions"><button className="primary" disabled={!claimable || claiming || actionBusy} title={claimTitle} onClick={assume}>{claiming ? "Verificando..." : "Assumir projeto"}</button><button className="secondary" onClick={openAI}><Icon name="spark" size={16} /> Assistente IA</button>{canAddImages && <><button className="secondary" disabled={actionBusy || uploadingImages} onClick={() => imageInputRef.current?.click()}>{uploadingImages ? "Enviando imagens..." : "Adicionar imagens"}</button><input ref={imageInputRef} className="image-file-input" type="file" accept="image/png,image/jpeg" multiple onChange={uploadImages} /></>}{canAbandon && <button className="secondary" disabled={actionBusy} onClick={onAbandon}>{actionBusy ? "Aguarde..." : "Abandonar continuação"}</button>}{canDelete && <button className="danger" disabled={actionBusy} onClick={onDelete}>{actionBusy ? "Aguarde..." : "Excluir projeto"}</button>}{imageUploadError && <p className="form-error image-upload-error" role="alert">{imageUploadError}</p>}</div></div>;
 }
 
 function Detail({ project, projects, openAI, onAssume, onBack, claiming, selectProject, canDelete, canAbandon, canAddImages, actionBusy, onDelete, onAbandon, onAddImages }: { project: Project; projects: Project[]; openAI: () => void; onAssume: () => void; onBack: () => void; claiming: boolean; selectProject: (p: Project) => void; canDelete: boolean; canAbandon: boolean; canAddImages: boolean; actionBusy: boolean; onDelete: () => void; onAbandon: () => void; onAddImages: (files: File[]) => Promise<void> }) {
@@ -654,44 +632,142 @@ function Mine({ projects, go, selectProject, onDeleteProject, onAbandonContinuat
   return <div className="page mine"><div className="page-heading"><div><h1>Meus projetos</h1><p>Acompanhe os projetos cuja continuidade você assumiu.</p></div><button className="primary" onClick={() => go("register")}>+ Cadastrar projeto</button></div><div className="status-tabs">{statuses.map((s) => <button className={filter === s ? "active" : ""} onClick={() => setFilter(s)} key={s}>{s}</button>)}</div>{shown.length ? <div className="cards-grid">{shown.map((p) => <div className="mine-card" key={p.id ?? p.name}><span className="pill">{p.mineStatus}</span><ProjectCard project={p} onClick={() => { selectProject(p); go("detail"); }} /><div className="mine-project-actions">{p.versionOf && ["Em andamento", "Planejamento"].includes(p.status) && <button className="secondary" disabled={actionPendingId === p.id} onClick={() => onAbandonContinuation(p)}>{actionPendingId === p.id ? "Aguarde..." : "Abandonar continuação"}</button>}<button className="danger" disabled={actionPendingId === p.id} onClick={() => onDeleteProject(p)}>{actionPendingId === p.id ? "Aguarde..." : "Excluir projeto"}</button></div></div>)}</div> : <div className="empty"><h3>Nenhuma continuação assumida</h3><p>Os projetos do acervo só aparecem aqui depois que você assume manualmente a continuidade de um deles.</p></div>}</div>;
 }
 
-type Suggestion = { id: number; title: string; text: string; added: boolean };
-function createLocalSuggestions(project: Project): Omit<Suggestion, "id" | "added">[] {
-  const objective = project.objective?.trim() || project.description;
-  const resources = projectResources(project);
-  const resourceList = resources.length ? resources.slice(0, 3).join(", ") : "os recursos disponíveis";
-  return [
-    {
-      title: "Validar a solução com o público-alvo",
-      text: `Converse com pessoas que vivenciam o problema de “${project.name}”, apresente a proposta e registre dúvidas, barreiras e mudanças prioritárias.`,
-    },
-    {
-      title: "Transformar o objetivo em etapas verificáveis",
-      text: `Divida este objetivo em entregas pequenas: ${objective} Defina para cada etapa um responsável, um prazo e um critério simples de conclusão.`,
-    },
-    {
-      title: "Planejar um protótipo de baixo custo",
-      text: `Comece com uma versão que use ${resourceList}. Teste o fluxo principal antes de ampliar funcionalidades e documente o que precisa ser ajustado.`,
-    },
-    {
-      title: "Registrar evidências de resultado",
-      text: "Escolha indicadores observáveis, compare a situação antes e depois do teste e guarde decisões, limitações e próximos passos para facilitar a continuidade.",
-    },
-  ];
-}
+type Suggestion = ProjectSuggestion & { id: number; added: boolean };
 
 function AIPanel({ project, close, usePlan }: { project: Project; close: () => void; usePlan: (plan: string) => void }) {
-  const [state, setState] = useState<"idle" | "ready">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const analyze = () => {
-    setSuggestions(createLocalSuggestions(project).map((suggestion, index) => ({ ...suggestion, id: index + 1, added: false })));
-    setState("ready");
+  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"suggestions" | "chat">("suggestions");
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  const chatProject = {
+    name: project.name,
+    area: project.area ?? "",
+    class: project.class,
+    year: project.year,
+    status: project.status,
+    description: project.description || project.objective || "Não informado",
+    objective: project.objective ?? "",
+    results: project.results ?? "",
+    resources: projectResources(project),
+  };
+  const analyze = async () => {
+    controller.current?.abort();
+    const request = new AbortController();
+    controller.current = request;
+    setState("loading");
+    setError("");
+    try {
+      const { suggestions: generated } = await getProjectSuggestions({
+        name: project.name,
+        area: project.area ?? "",
+        class: project.class,
+        year: project.year,
+        status: project.status,
+        description: project.description,
+        objective: project.objective ?? "",
+        results: project.results ?? "",
+        resources: projectResources(project),
+      }, request.signal);
+      setSuggestions(generated.map((suggestion: ProjectSuggestion, index) => ({ ...suggestion, id: index + 1, added: false })));
+      setState("ready");
+    } catch (requestError) {
+      if (request.signal.aborted) return;
+      setError(errorMessage(requestError));
+      setState("error");
+    }
   };
   const plan = suggestions.filter((suggestion) => suggestion.added).map((suggestion) => `${suggestion.title}: ${suggestion.text}`).join("\n");
-  return <><div className="overlay" onClick={close} /><aside className="ai-panel"><button className="close" onClick={close} aria-label="Fechar assistente"><Icon name="close" size={20} /></button><div className="ai-title"><div className="ai-brain"><Icon name="spark" /></div><div><h2>Assistente de projetos</h2><p>Sugestões criadas neste navegador, sem enviar dados a um serviço externo.</p></div></div><div className="ai-project"><Picture /><div><b>{project.name}</b><small>{project.area || project.class || project.year}</small><Tags items={projectResources(project).slice(0, 2)} /></div></div><button className="ai-analyze" onClick={analyze}>{state === "ready" ? "Gerar novamente" : "Gerar sugestões"}</button>
-    {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Planeje os próximos passos</h3><p>Receba sugestões gerais de validação, prototipagem e documentação com base nas informações deste projeto.</p></div>}
-    {state === "ready" && <div className="suggestions"><h3>Sugestões de desenvolvimento</h3>{suggestions.map((suggestion) => <article key={suggestion.id}><div className="suggest-icon"><Icon name="spark" size={16} /></div><div><b>{suggestion.title}</b><p>{suggestion.text}</p><div><button className={suggestion.added ? "added" : "primary"} onClick={() => setSuggestions((current) => current.map((item) => item.id === suggestion.id ? { ...item, added: !item.added } : item))}>{suggestion.added ? <><Icon name="check" size={14} /> Adicionado</> : "Adicionar ao plano"}</button><button className="text-button" onClick={() => setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))}>Descartar</button></div></div></article>)}</div>}
-    <button className="use-plan" disabled={!plan} onClick={() => usePlan(plan)}>Usar no plano da Nova Versão</button>
+  return <><div className="overlay" onClick={close} /><aside className="ai-panel" aria-busy={state === "loading"}><button className="close" onClick={close} aria-label="Fechar assistente"><Icon name="close" size={20} /></button><div className="ai-title"><div className="ai-brain"><Icon name="spark" /></div><div><h2>Assistente de projetos</h2><p>A IA usará os dados deste projeto para sugerir e conversar.</p></div></div><div className="ai-project"><Picture /><div><b>{project.name}</b><small>{project.area || project.class || project.year}</small><Tags items={projectResources(project).slice(0, 2)} /></div></div>
+    <div className="ai-tabs" role="tablist" aria-label="Assistente de projetos">
+      <button type="button" role="tab" aria-selected={activeTab === "suggestions"} className={activeTab === "suggestions" ? "active" : ""} onClick={() => setActiveTab("suggestions")}>Sugestões</button>
+      <button type="button" role="tab" aria-selected={activeTab === "chat"} className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")}>Conversar sobre o projeto</button>
+    </div>
+    <div hidden={activeTab !== "suggestions"}>
+      <button className="ai-analyze" disabled={state === "loading"} onClick={() => { void analyze(); }}>{state === "loading" ? "Consultando a IA..." : state === "ready" ? "Gerar novamente" : "Gerar sugestões"}</button>
+      {state === "idle" && <div className="ai-placeholder"><Icon name="spark" size={30} /><h3>Planeje os próximos passos</h3><p>A IA analisará os objetivos, resultados e recursos informados para propor ações concretas de continuidade.</p></div>}
+      {state === "loading" && <p className="ai-placeholder" role="status">A IA está analisando o projeto. Isso pode levar alguns segundos.</p>}
+      {state === "error" && <p className="form-error" role="alert">{error}</p>}
+      {state === "ready" && <div className="suggestions"><h3>Sugestões de desenvolvimento</h3>{suggestions.map((suggestion) => <article key={suggestion.id}><div className="suggest-icon"><Icon name="spark" size={16} /></div><div><b>{suggestion.title}</b><p>{suggestion.text}</p><div><button className={suggestion.added ? "added" : "primary"} onClick={() => setSuggestions((current) => current.map((item) => item.id === suggestion.id ? { ...item, added: !item.added } : item))}>{suggestion.added ? <><Icon name="check" size={14} /> Adicionado</> : "Adicionar ao plano"}</button><button className="text-button" onClick={() => setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))}>Descartar</button></div></div></article>)}</div>}
+      <button className="use-plan" disabled={!plan} onClick={() => usePlan(plan)}>Usar no plano da Nova Versão</button>
+    </div>
+    <div hidden={activeTab !== "chat"}>
+      <ChatConversation project={chatProject} suggestions={suggestions} />
+    </div>
   </aside></>;
+}
+
+function ChatConversation({ project, suggestions }: { project: Record<string, string | string[]>; suggestions: ProjectSuggestion[] }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, sending]);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const content = input.trim();
+    if (!content || sending) return;
+
+    const userMessage: ChatMessage = { role: "user", content };
+    const context = [...messages, userMessage].slice(-8);
+    let contextLength = 0;
+    const recentMessages: ChatMessage[] = [];
+
+    for (const message of [...context].reverse()) {
+      if (contextLength + message.content.length > 6000) break;
+      recentMessages.unshift(message);
+      contextLength += message.content.length;
+    }
+
+    setMessages((current) => [...current, userMessage]);
+    setInput("");
+    setError("");
+    setSending(true);
+
+    try {
+      const result = await sendChatMessage(recentMessages, project, suggestions);
+      setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
+      setRemaining(result.remaining);
+    } catch (requestError) {
+      const message = errorMessage(requestError);
+      if (message.includes("limite de 10 mensagens por hora")) setRemaining(0);
+      setMessages((current) => current.slice(0, -1));
+      setInput(content);
+      setError(message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return <>
+    {messages.length > 0 && <button className="secondary chat-new" disabled={sending} onClick={() => { setMessages([]); setError(""); }}>Nova conversa</button>}
+    <div className="chat-card">
+      <div className="chat-toolbar">
+        <div className="chat-avatar"><Icon name="spark" size={18} /></div>
+        <div><b>Sobre {project.name}</b><small>A conversa considera os dados e sugestões deste projeto</small></div>
+        <span className="chat-limit">{remaining === null ? "Limite: 10 mensagens por hora" : `${remaining} de 10 mensagens restantes nesta hora`}</span>
+      </div>
+      <div className="chat-messages" aria-live="polite" aria-label="Mensagens da conversa">
+        {messages.length === 0 && <div className="chat-welcome"><div className="chat-avatar"><Icon name="spark" size={22} /></div><h2>Vamos pensar melhor neste projeto?</h2><p>Pergunte sobre as sugestões, explore alternativas ou planeje os próximos passos. Cada mensagem pode ter até 1.200 caracteres.</p></div>}
+        {messages.map((message, index) => <article className={`chat-message ${message.role}`} key={`${index}-${message.role}`}><span>{message.role === "user" ? "Você" : "Assistente"}</span><p>{message.content}</p></article>)}
+        {sending && <p className="chat-pending" role="status">A IA está preparando uma resposta...</p>}
+        {error && <p className="form-error chat-error" role="alert">{error}</p>}
+        <div ref={messagesEndRef} />
+      </div>
+      <form className="chat-composer" onSubmit={(event) => { void submit(event); }}>
+        <label className="sr-only" htmlFor="project-chat-input">Sua mensagem para a IA</label>
+        <textarea id="project-chat-input" value={input} maxLength={1200} rows={3} placeholder="Converse sobre este projeto..." onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+        <div className="chat-composer-footer"><small>{input.length}/1.200 caracteres · Enter envia, Shift+Enter quebra a linha</small><button className="primary" type="submit" disabled={sending || !input.trim() || remaining === 0}>{sending ? "Enviando..." : "Enviar"}</button></div>
+      </form>
+    </div>
+  </>;
 }
 
 function AuthModal({ close, onAuthenticated }: { close: () => void; onAuthenticated: (user: User) => void }) {
@@ -803,10 +879,9 @@ export default function App() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [query, setQuery] = useState("");
   const [bundledProjects, setBundledProjects] = useState<Project[]>([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
   const [remoteProjects, setRemoteProjects] = useState<Project[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [loadingProjects, setLoadingProjects] = useState(Boolean(supabase));
+  const [loadingProjects, setLoadingProjects] = useState(true);
   const [notice, setNotice] = useState(supabase ? "" : "Catálogo local disponível. Configure o Supabase para login e ações colaborativas.");
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingScreen, setPendingScreen] = useState<Screen | null>(null);
@@ -823,21 +898,6 @@ export default function App() {
     return [...merged.values()].sort((left, right) => compareAcademicPeriod(projectAcademicPeriod(right), projectAcademicPeriod(left)));
   }, [bundledProjects, remoteProjects]);
   const mineProjects = user ? remoteProjects.filter((project) => project.ownerId === user.id && Boolean(project.versionOf)) : [];
-
-  useEffect(() => {
-    let active = true;
-    void import("../supabase/seed/projects.json")
-      .then(({ default: catalog }) => {
-        if (active) setBundledProjects(catalog.projects.map(projectFromCatalog));
-      })
-      .catch((error: unknown) => {
-        if (active) setNotice(`Não foi possível carregar o catálogo incluído no site: ${errorMessage(error)}`);
-      })
-      .finally(() => {
-        if (active) setCatalogLoading(false);
-      });
-    return () => { active = false; };
-  }, []);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("acervo-projetos:theme");
@@ -874,15 +934,11 @@ export default function App() {
 
   useEffect(() => {
     const client = supabase;
-    if (!client) {
-      setLoadingProjects(false);
-      return;
-    }
     let active = true;
     const loadProjects = async () => {
       setLoadingProjects(true);
       try {
-        if (user) {
+        if (client && user) {
           const localProjects = readSavedProjects();
           if (localProjects.length) {
             const rows = localProjects.map((project) => projectToRow({
@@ -905,11 +961,18 @@ export default function App() {
             setNotice(`${rowsToImport.length} projeto(s) local(is) importado(s) para o Supabase.`);
           }
         }
-        const { data: rows, error: queryError } = await client.from("projects").select("*").order("created_at", { ascending: false });
-        if (queryError) throw queryError;
-        if (active) setRemoteProjects((rows ?? []).map((row) => projectFromRow(row)));
+        const catalog = await getProjects();
+        if (!Array.isArray(catalog.projects)) throw new Error("A API retornou um catálogo inválido.");
+        if (!active) return;
+        if (catalog.source === "database") {
+          setBundledProjects([]);
+          setRemoteProjects(catalog.projects.map((row) => projectFromRow(row)));
+        } else {
+          setRemoteProjects([]);
+          setBundledProjects(catalog.projects.map(projectFromCatalog));
+        }
       } catch (error) {
-        if (active) setNotice(`Não foi possível carregar projetos online; o catálogo local continua disponível. ${errorMessage(error)}`);
+        if (active) setNotice(`Não foi possível carregar projetos pela API. ${errorMessage(error)}`);
       } finally {
         if (active) setLoadingProjects(false);
       }
@@ -1173,7 +1236,7 @@ export default function App() {
     || projects.some((project) => project.versionOf === selected.id && project.ownerId === user.id && ["Em andamento", "Planejamento"].includes(project.status))
   ));
   return <Shell screen={screen} go={go} user={user} onOpenAuth={() => setAuthOpen(true)} onSignOut={signOut} notice={notice} dismissNotice={() => setNotice("")} theme={theme} toggleTheme={toggleTheme}>
-    {(loadingProjects || catalogLoading) && <p className="backend-loading" role="status">Carregando projetos...</p>}
+    {loadingProjects && <p className="backend-loading" role="status">Carregando projetos...</p>}
     {screen === "home" && <Home projects={projects} go={go} setSearch={setQuery} selectProject={selectProject} />}
     {screen === "archive" && <Archive projects={projects} go={go} query={query} setQuery={setQuery} selectProject={selectProject} />}
     {screen === "detail" && <Detail project={selected} projects={projects} openAI={() => setAiOpen(true)} onAssume={() => { void beginContinuity(selected); }} onBack={() => setScreen("archive")} claiming={claimingProjectId === selected.id} selectProject={selectProject} canDelete={canDeleteSelectedProject} canAbandon={canAbandonSelectedProject} canAddImages={canAddImagesToSelectedProject} actionBusy={projectActionId === selected.id} onDelete={() => { void deleteProject(selected); }} onAbandon={() => { void abandonContinuation(selected); }} onAddImages={(files) => addProjectImages(selected, files)} />}

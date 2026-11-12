@@ -8,10 +8,12 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/build-project-catalog.mjs",
-    "dev": "node --env-file-if-exists=.env.local node_modules/vite/bin/vite.js",
+    "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs",
     "seed:supabase": "node --env-file-if-exists=.env.local scripts/seed-supabase.mjs",
     "prebuild": "node scripts/build-project-catalog.mjs",
     "build": "vite build",
+    "prestart": "npm run build",
+    "start": "node --env-file-if-exists=.env.local scripts/start.mjs",
     "preview": "vite preview",
     "format": "oxfmt"
   },

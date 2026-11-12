@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises"
 
 import { readFile } from "node:fs/promises"
 
-import { resolve } from "node:path"
+import { relative, resolve, sep } from "node:path"
 
 import { fileURLToPath } from "node:url"
 
@@ -185,6 +185,7 @@ if (!pendingProjects.length) {
   )
 } else {
   const uploadedPaths = []
+  let unavailableAssets = 0
 
   try {
     const rows = []
@@ -193,7 +194,27 @@ if (!pendingProjects.length) {
       const attachments = []
 
       for (const attachment of project.attachments ?? []) {
-        const bytes = await readFile(resolve(seedDirectory, attachment.asset))
+        const assetPath = resolve(seedDirectory, attachment.asset)
+        const relativeAssetPath = relative(seedDirectory, assetPath)
+        if (
+          !relativeAssetPath ||
+          relativeAssetPath === ".." ||
+          relativeAssetPath.startsWith(`..${sep}`)
+        ) {
+          throw new Error(
+            `Caminho de anexo fora da pasta do seed: ${attachment.asset}`,
+          )
+        }
+
+        let bytes
+        try {
+          bytes = await readFile(assetPath)
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error
+          attachments.push({ name: attachment.name })
+          unavailableAssets += 1
+          continue
+        }
 
         const extension = attachment.asset.split(".").at(-1)?.toLowerCase()
 
@@ -266,6 +287,6 @@ if (!pendingProjects.length) {
   }
 
   console.log(
-    `Carga inicial concluída: ${pendingProjects.length} projetos e ${uploadedPaths.length} imagens adicionados.`,
+    `Carga inicial concluída: ${pendingProjects.length} projetos e ${uploadedPaths.length} imagens enviados. ${unavailableAssets} imagem(ns) sem arquivo local foram registrada(s) apenas pelo nome.`,
   )
 }
